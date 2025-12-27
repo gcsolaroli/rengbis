@@ -29,18 +29,21 @@ object SchemaSpec extends ZIOSpecDefault:
         parseTest("""= text { length > 10 }""",             TextValue(TextConstraint.MinLength(11))),
         parseTest("""= text { length <= 100 }""",           TextValue(TextConstraint.MaxLength(100))),
         parseTest("""= text { length < 100 }""",            TextValue(TextConstraint.MaxLength(99))),
-        parseTest("""= text { 10 <= length <= 100 }*""",    ListOfValues(TextValue(TextConstraint.MinLength(10), TextConstraint.MaxLength(100)))),
 
+        // parseTest("""= text { regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})" }""", TextValue(TextConstraint.Regex("([0-9]{4}-[0-9]{2}-[0-9]{2})".r))),
+
+        parseTest("""= text { 10 <= length <= 100 }*""",    ListOfValues(TextValue(TextConstraint.MinLength(10), TextConstraint.MaxLength(100)))),
         parseTest("""= text{10}""",                         ListOfValues(TextValue(), ListConstraint.ExactSize(10))),
         parseTest("""= text { 10 <= length <= 100 }{10}""", ListOfValues(TextValue(TextConstraint.MinLength(10), TextConstraint.MaxLength(100)), ListConstraint.ExactSize(10))),
+
 
         // ----------------------------------------------------------------
         test("with extra empty lines"):
             val schemaDefinition = """
-            
+
 = text | number
 
-             
+
 """
             assertTrue(parse(schemaDefinition) == Right(AlternativeValues(TextValue(), NumericValue())))
         ,   // ----------------------------------------------------------------
@@ -177,4 +180,3 @@ bar = {
             )
         ,   // ----------------------------------------------------------------
     )
-

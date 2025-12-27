@@ -126,10 +126,40 @@ Tuple values are not useful for *regular* documents (`yaml`, `json`, `xml`, …)
 
 
 ## Text constraints
+
+### Size constraints
+It is possible to constraint the size of the text.
 ```rengbis
-= text { pattern = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 }
+exactSize = text { length == 10 }
+short = text { length <= 4 }
+long  = text { length > 20 }
+inBetween  = text { 8 < length <= 12 }
+exactSize = text { length == 10 }
+= exactSize | short | long | inBetween
 ```
-Text values may be constraint with either a `pattern` (defined as a `regex`) or a `length`.
+
+
+### Regular expressions
+```rengbis
+= text { regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 }
+```
+Text values may be constraint with either a `regex` or a `length`.
+This would match an ISO8060 date value, like `2025-12-27`.
+
+### Patterns
+It's also possible to use COBOL like 'picture clause' in order to express easier to read formats.
+
+```rengbis
+= text { pattern = "(###) ###-####" }
+```
+This would match an US formatted phone number, like `(123) 456-7890`.
+
+The current implementation handles these format specifiers:
+- `#`: any digit
+- `X`: any letter
+- `@`: any alphanumeric character
+- `*`: any character
+- any other character is parsed unchanged
 
 ## List constraints
 ```rengbis

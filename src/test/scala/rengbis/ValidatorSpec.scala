@@ -10,6 +10,7 @@ object ValidatorSpec extends ZIOSpecDefault:
     val validateYamlString = Validator.validateString(DataParsers.yaml)
     val validateJsonString = Validator.validateString(DataParsers.json)
     val validateXmlString  = Validator.validateString(DataParsers.xml)
+    val validateString     = Validator.validateString(DataParsers.text)
 
     def spec = suite("Validator features") (
         test("trivial Yaml values"):
@@ -93,8 +94,8 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value) => assertTrue(value == "")
             )
         ,
-        test("text constraints (pattern)"):
-            val schemaDefinition ="""= text { pattern = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 }"""
+        test("text constraints (regex)"):
+            val schemaDefinition ="""= text { regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})" }"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -105,15 +106,39 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value) => assertTrue(value == "")
             )
         ,
-        test("text constraints (email pattern)"):
-            // val schemaDefinition ="""= text { pattern = "/^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/" }"""
-            val schemaDefinition ="""= text { pattern = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }"""
+        test("text constraints (regex) with also length constraint"):
+            val schemaDefinition ="""= text { regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateYamlString(schema, "2004-01-20") .isValid),
+                        assertTrue(validateYamlString(schema, "Joe").isValid == false),
+                        assertTrue(validateYamlString(schema, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore.").isValid == false),
+                    )
+                case Left(value) => assertTrue(value == "")
+            )
+        ,
+        test("text constraints (email regex)"):
+            // val schemaDefinition ="""= text { regex = "/^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/" }"""
+            val schemaDefinition ="""= text { regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
                         assertTrue(validateYamlString(schema, "joe@example.com") .isValid),
                         assertTrue(validateYamlString(schema, "joe@example").isValid == false),
                         assertTrue(validateYamlString(schema, "joe.example.com").isValid == false),
+                    )
+                case Left(value) => assertTrue(value == "")
+            )
+        ,
+        test("text patterns"):
+            val schemaDefinition ="""= text { pattern = "{###-###-####}"}"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateString(schema, "{123-456-7890}") .isValid),
+                        assertTrue(validateString(schema, "joe@example").isValid == false),
+                        assertTrue(validateString(schema, "joe.example.com").isValid == false),
                     )
                 case Left(value) => assertTrue(value == "")
             )

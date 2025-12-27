@@ -12,7 +12,7 @@ object Validator:
         def isValid: Boolean = value match
             case v: Valid                   => true
             case v: Chunk[ValidationError]  => false
-    
+
     object ValidationResult:
         def reportError(message: String): ValidationResult = ValidationResult(Chunk(ValidationError(message)))
         val valid: ValidationResult = ValidationResult(Valid())
@@ -32,11 +32,31 @@ object Validator:
 
     // ========================================================================
 
+    def formatToRegex(format: String): scala.util.matching.Regex =
+        val sb = new StringBuilder
+        var i = 0
+        while (i < format.length)
+            format(i) match
+                // case '#' => sb.append("""[0-9]""")
+                case '#' => sb.append("""\p{N}""")
+                // case 'X' => sb.append("""[a-zA-Z]""")
+                case 'X' => sb.append("""\p{Letter}""")
+                // case '@' => sb.append("""[a-zA-Z0-9]""")
+                case '@' => sb.append("""[\p{Letter}\p{N}]""")
+                case '*' => sb.append(""".""")
+                // case '-' | '/' | ' ' => sb.append("\\").append(format(i))
+                case c => sb.append("""\""").append(c)
+            i += 1
+        val result = sb.toString.r
+        println(s"formatToRegex: ${format} => '${result}'")
+        result
+
     def validateTextConstraints(constraint: TextConstraint.Constraint, text: String) = constraint match
-        case TextConstraint.MinLength(size) => if (text.length >= size) then ValidationResult.valid else ValidationResult.reportError(s"minLength constraint (${size}) not met: ${text.length()}")
-        case TextConstraint.MaxLength(size) => if (text.length <= size) then ValidationResult.valid else ValidationResult.reportError(s"maxLength constraint (${size}) not met: ${text.length()}")
-        case TextConstraint.Length(size)    => if (text.length == size) then ValidationResult.valid else ValidationResult.reportError(s"length constraint (${size}) not met: ${text.length()}")
-        case TextConstraint.Pattern(regex)  => if regex.matches(text)   then ValidationResult.valid else ValidationResult.reportError(s"pattern (${regex.regex}) not matching")
+        case TextConstraint.MinLength(size) => if (text.length >= size)                 then ValidationResult.valid else ValidationResult.reportError(s"minLength constraint (${size}) not met: ${text.length()}")
+        case TextConstraint.MaxLength(size) => if (text.length <= size)                 then ValidationResult.valid else ValidationResult.reportError(s"maxLength constraint (${size}) not met: ${text.length()}")
+        case TextConstraint.Length(size)    => if (text.length == size)                 then ValidationResult.valid else ValidationResult.reportError(s"length constraint (${size}) not met: ${text.length()}")
+        case TextConstraint.Regex(regex)    => if regex.matches(text)                   then ValidationResult.valid else ValidationResult.reportError(s"regex (${regex.regex}) not matching")
+        case TextConstraint.Format(format)  => if formatToRegex(format).matches(text)   then ValidationResult.valid else ValidationResult.reportError(s"format (${format}) not matching")
 
     def validateListConstraints[A](constraint: ListConstraint.Constraint, list: Chunk[A]) =
         val size = list.size
@@ -90,7 +110,3 @@ object Validator:
             )
             case value => ValidationResult.reportError(s"expected object value; ${value.valueTypeDescription} found")
         case NamedValueReference(_) => ValidationResult.reportError(s"#WTF: unresolved NamedValueReference still present")
-    
-
-
-

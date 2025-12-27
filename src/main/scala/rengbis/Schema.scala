@@ -16,7 +16,8 @@ object Schema:
 
     object TextConstraint:
         sealed abstract class Constraint
-        case class Pattern(regex: Regex)    extends Constraint
+        case class Regex(regex: scala.util.matching.Regex)  extends Constraint
+        case class Format(format: String)                   extends Constraint
 
         sealed abstract class TextSizeConstraint(val size: Int) extends Constraint
         case class MinLength(override val size: Int)    extends TextSizeConstraint(size)
@@ -69,12 +70,12 @@ object Schema:
                 case None           =>  Right(this)
         override def dependencies: Seq[String] = Seq(reference)
 
-    def parse(schemaDefinition: String): Either[String, Schema] = 
+    def parse(schemaDefinition: String): Either[String, Schema] =
         SchemaSyntax.parse(schemaDefinition)
 
-    def sequenceEithers[E, A](list: Seq[Either[E, A]]): Either[E, Seq[A]] = 
+    def sequenceEithers[E, A](list: Seq[Either[E, A]]): Either[E, Seq[A]] =
         list.foldLeft[Either[E, Seq[A]]](Right(Seq.empty)) { (acc, current) =>
-            for 
+            for
                 accumulator <- acc
                 value       <- current
             yield accumulator :+ value
@@ -121,7 +122,7 @@ object Schema:
             <>  Syntax.string(">",  ExtendedSizeConstraint.GT)
             <>  smallerSizeConstrint.widen[SizeConstraint]
 
-        val sizeTextConstraint: SchemaSyntax[Chunk[TextConstraint.TextSizeConstraint]]
+        val sizeTextConstraints: SchemaSyntax[Chunk[TextConstraint.TextSizeConstraint]]
             =   (Syntax.string("length", ()) ~ whitespaces ~ sizeConstraint ~ whitespaces ~ number).transform(
                     (c, n) => Chunk(
                         c match
@@ -152,15 +153,22 @@ object Schema:
                     ,
                     c => (c.head.size, SmallerSizeConstraint.LE)
                 )
-        val patternTextConstraint: SchemaSyntax[TextConstraint.Constraint]
-            = (Syntax.string("pattern", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString).transform(
-                text => TextConstraint.Pattern(text.r),
+        val regexTextConstraint: SchemaSyntax[TextConstraint.Constraint]
+            = (Syntax.string("regex", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString).transform(
+                text => TextConstraint.Regex(text.r),
                 c => c.regex.regex
             ).widen[TextConstraint.Constraint]
 
+        val formatTextConstraint: SchemaSyntax[TextConstraint.Constraint]
+            = (Syntax.string("pattern", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString).transform(
+                text => TextConstraint.Format(text),
+                c => c.format
+            ).widen[TextConstraint.Constraint]
+
         val textConstraints: SchemaSyntax[Chunk[TextConstraint.Constraint]]
-            =   sizeTextConstraint.widen[Chunk[TextConstraint.Constraint]]
-            <>  patternTextConstraint.*
+            =   sizeTextConstraints.widen[Chunk[TextConstraint.Constraint]]
+            <>  regexTextConstraint.+
+            <>  formatTextConstraint.+
 
         val textValue:      SchemaSyntax[Schema.TextValue]      = (Syntax.string("text", ())
             ~ (whitespaces ~ Syntax.char('{') ~ whitespaces ~> textConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char('}')).optional
@@ -174,7 +182,7 @@ object Schema:
         val numericValue:   SchemaSyntax[Schema.NumericValue]   = Syntax.string("number",  Schema.NumericValue())
 
         val label: SchemaSyntax[String] = (Syntax.letter ~ (Syntax.alphaNumeric <> Syntax.charIn("_-")).repeat0).string
-        
+
         val madatoryLabel: SchemaSyntax[ObjectLabel] = label.transform(
             s => MandatoryLabel(s),
             l => l.label
@@ -240,7 +248,7 @@ object Schema:
                         (items.schema, minSize, maxSize)
                 )
 
-        val tupleValues: SchemaSyntax[Schema.TupleValue] = (Syntax.char('(') ~> 
+        val tupleValues: SchemaSyntax[Schema.TupleValue] = (Syntax.char('(') ~>
                 (emptyLines ~ whitespaces ~ item).repeatWithSep( whitespaces ~ (Syntax.char(',') <> emptyLines))
             <~ whitespaces ~ Syntax.char(')'))
         .filter(values => values.size > 1, s"tuple needs to have at least two items")
