@@ -1,0 +1,7 @@
+<person>
+    <name>Charlie Brown</name>
+    <age>35</age>
+    <email>charlie@example.net</email>
+    <hobbies>music</hobbies>
+    <hobbies>cooking</hobbies>
+</person>

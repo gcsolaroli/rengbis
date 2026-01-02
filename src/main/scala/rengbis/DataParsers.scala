@@ -15,10 +15,9 @@ import scala.util.{ Failure, Success, Try }
 object DataParsers:
     def json(jsonString: String): Either[String, Value] = jsonString.fromJson[Json].map(fromJson)
     def yaml(yamlString: String): Either[String, Value] = Backend.parse[Json](yamlString).left.map(_.getMessage()).map(fromJson(_))
-    def xml(xmlString: String): Either[String, Value]   = Try(xmlToValue(XML.loadString(xmlString))) match {
+    def xml(xmlString: String): Either[String, Value]   = Try(xmlToValue(XML.loadString(xmlString))) match
         case Success(value)     => Right(value)
         case Failure(exception) => Left(exception.getMessage())
-    }
     def text(text: String): Either[String, Value]       = Right(rengbis.Value.TextValue(text))
 
     private def fromJson(json: Json): Value = json match

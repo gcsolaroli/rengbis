@@ -1,0 +1,7 @@
+# Schema for a person object
+= {
+    name: text { 1 <= length <= 100 }
+    age: number
+    email?: text { regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }
+    hobbies: text*
+}

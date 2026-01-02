@@ -1,0 +1,4 @@
+# Invalid schema - missing closing brace
+= {
+    name: text
+    age: number

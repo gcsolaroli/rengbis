@@ -1,8 +1,12 @@
 package rengbis
 
-import zio.test.{ assertTrue, TestConsole, ZIOSpecDefault }
+import zio.{ Task, ZIO }
+import zio.test.{ assertTrue, ZIOSpecDefault }
 import zio.test.TestResult.allSuccesses
-import zio.Chunk
+
+import java.nio.file.{ Files, Path, Paths }
+import scala.jdk.CollectionConverters.*
+
 import rengbis.Schema.*
 
 object SchemaSpec extends ZIOSpecDefault:
@@ -220,5 +224,115 @@ bar = {
                 assertTrue(parse(schemaDefinition).isLeft),
                 assertTrue(parse(schemaDefinition).swap.getOrElse("").contains("tuple needs to have at least two items"))
             )
-        // ----------------------------------------------------------------
+    )
+
+// ############################################################################
+
+object SchemaSamplesSpec extends ZIOSpecDefault:
+    type FileValidationResult = (String, Either[String, String])
+
+    def isExpectedToFail(path: Path): Boolean =
+        val fileName       = path.getFileName.toString
+        val nameWithoutExt = fileName.lastIndexOf('.') match
+            case -1 => fileName
+            case i  => fileName.substring(0, i)
+        nameWithoutExt.endsWith("-NOT_VALID")
+
+    def validateSchemaFiles(schemasDir: Path): Task[List[FileValidationResult]] =
+        ZIO.attempt:
+            Files
+                .list(schemasDir)
+                .iterator()
+                .asScala
+                .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".rengbis"))
+                .map { schemaFile =>
+                    val fileName       = schemaFile.getFileName.toString
+                    val content        = Files.readString(schemaFile)
+                    val parseResult    = Schema.parse(content)
+                    val expectedToFail = isExpectedToFail(schemaFile)
+
+                    (parseResult, expectedToFail) match
+                        case (Right(_), false)  => (fileName, Right("valid as expected"))
+                        case (Left(_), true)    => (fileName, Right("invalid as expected"))
+                        case (Right(_), true)   => (fileName, Left("expected to be invalid but parsed successfully"))
+                        case (Left(err), false) => (fileName, Left(s"expected to be valid but failed: $err"))
+                }
+                .toList
+
+    def validateDataFiles(schemasDir: Path): Task[List[FileValidationResult]] =
+        ZIO.attempt:
+            val schemaDirs = Files
+                .list(schemasDir)
+                .iterator()
+                .asScala
+                .filter(p => Files.isDirectory(p))
+                .toList
+
+            schemaDirs.flatMap { schemaDir =>
+                val schemaName = schemaDir.getFileName.toString
+                val schemaFile = schemasDir.resolve(s"$schemaName.rengbis")
+
+                if !Files.exists(schemaFile) then List((s"$schemaName/", Left(s"no matching schema file found: $schemaName.rengbis")))
+                else
+                    val schemaContent = Files.readString(schemaFile)
+                    Schema.parse(schemaContent) match
+                        case Left(err)     =>
+                            List((schemaFile.getFileName.toString, Left(s"schema parse error: $err")))
+                        case Right(schema) =>
+                            validateDataFilesForSchema(schemaDir, schema)
+            }
+
+    def validateDataFilesForSchema(schemaDir: Path, schema: Schema): List[FileValidationResult] =
+        val formatDirs = Files
+            .list(schemaDir)
+            .iterator()
+            .asScala
+            .filter(p => Files.isDirectory(p))
+            .toList
+
+        formatDirs.flatMap { formatDir =>
+            val formatName                                      = formatDir.getFileName.toString.toLowerCase
+            val parser: Option[String => Either[String, Value]] = formatName match
+                case "json" => Some(DataParsers.json)
+                case "yaml" => Some(DataParsers.yaml)
+                case "xml"  => Some(DataParsers.xml)
+                case _      => None
+
+            parser match
+                case None             =>
+                    List((s"${ schemaDir.getFileName }/$formatName/", Left(s"unknown format: $formatName (expected json, yaml, or xml)")))
+                case Some(dataParser) =>
+                    val dataFiles = Files
+                        .list(formatDir)
+                        .iterator()
+                        .asScala
+                        .filter(p => Files.isRegularFile(p))
+                        .toList
+
+                    dataFiles.map { dataFile =>
+                        val content        = Files.readString(dataFile)
+                        val result         = Validator.validateString(dataParser)(schema, content)
+                        val expectedToFail = isExpectedToFail(dataFile)
+                        val relativePath   = s"${ schemaDir.getFileName }/$formatName/${ dataFile.getFileName }"
+
+                        (result.isValid, expectedToFail) match
+                            case (true, false)  => (relativePath, Right("valid as expected"))
+                            case (false, true)  => (relativePath, Right("invalid as expected"))
+                            case (true, true)   => (relativePath, Left("expected to be invalid but validated successfully"))
+                            case (false, false) => (relativePath, Left(s"expected to be valid but failed: ${ result.errorMessage }"))
+                    }
+        }
+
+    def spec = suite("Schema parsing samples")(
+        test("validate all schema and data files in resources/schemas"):
+            val schemasDir = Paths.get(getClass.getClassLoader.getResource("schemas").toURI)
+
+            for
+                schemaResults <- validateSchemaFiles(schemasDir)
+                dataResults   <- validateDataFiles(schemasDir)
+                allResults     = schemaResults ++ dataResults
+                failures       = allResults.collect { case (file, Left(error)) => s"  - $file: $error" }
+            yield
+                if failures.isEmpty then assertTrue(true)
+                else assertTrue(false) ?? s"Validation failures:\n${ failures.mkString("\n") }"
     )

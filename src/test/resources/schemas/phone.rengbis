@@ -1,0 +1,2 @@
+# Schema for phone number with pattern
+= text { pattern = "(###) ###-####" }

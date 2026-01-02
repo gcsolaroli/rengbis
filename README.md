@@ -187,3 +187,17 @@ This is a very early prototype, shared only to get some feedback; besides the fe
 ## Future enhancements
 Before venturing in this experiment, I did many tries with [`zio-schema`](https://github.com/zio/zio-schema); unfortunately I was not able to find a way to use that library to achieve my goals.
 [Lately](https://x.com/jdegoes/status/1919380595597090856) a [new version](https://github.com/zio/zio-blocks) of `zio-schema` has been announced; I haven't had the time to play with it yet, but the idea of using `rengbis` as a language to define `zio-schema` values that could be later leveraged to validate/parse actual payloads, getting rid of the custom  machinary I had to build myself seems an interesting option to validate.
+
+
+## Build options
+
+### Fat JAR
+Using the `sbt assembly` command you get a fat JAR in `target/scala-3.7.4/rengbis.jar`.
+
+This file can then be used like a regular `java` application:
+```shell
+java -jar target/scala-3.7.4/rengbis.jar validate-schema schema.rengbis
+```
+
+### Native binary
+Using the `sbt nativeImage` it is possible to build a native executables, `target/native-image/rengbis`.
