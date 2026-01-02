@@ -177,8 +177,8 @@ The options for numeric constraints are way more articulated than what has alrea
 Nothing is conceptually difficult, but will probably require a lot of tries before finding a satisfying arrangement.
 Values would have to be constraint at least on **range of values**, number of decimal digits, precision, scale; more option may emerge while working on the definition.
 
-## Comments - MISSING
-Comments are currently not supported; I briefely tried to add their definition to the syntax, but failed miserably, so I have postpone the effort.
+## Comments
+Anything after a `#` character, up to the end of the line, is ignored by the parser and thus treated as a comment.
 
 
 # Status of the project

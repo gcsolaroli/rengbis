@@ -1,8 +1,8 @@
 // ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
 
 ThisBuild / organization := "relax-schema"
-ThisBuild / scalaVersion := "3.6.4"
-// ThisBuild / scalaVersion := "3.7.0"
+// ThisBuild / scalaVersion := "3.6.4"
+ThisBuild / scalaVersion := "3.7.4"
 ThisBuild / usePipelining := true
 
 ThisBuild / scalacOptions ++= Seq(
@@ -54,7 +54,7 @@ lazy val dependencies = Seq(
 
     "org.slf4j"               %   "slf4j-simple"                  % "2.0.13",
   ),
-  
+
   libraryDependencies ++= Seq(
     "dev.zio"               %% "zio-test"             % zio,
     "dev.zio"               %% "zio-test-sbt"         % zio,
