@@ -12,7 +12,7 @@ object Main extends ZIOCliDefault:
     enum Format:
         case Json, Yaml, Xml
 
-    enum CliCommand:
+    enum RengbisCommand:
         case ValidateSchema(schemaFiles: List[Path])
         case ValidateData(format: Format, schemaFile: Path, dataFiles: List[Path])
 
@@ -25,13 +25,13 @@ object Main extends ZIOCliDefault:
             )
             .alias("f")
 
-    val schemaOption: Options[Path] =
+    def schemaOption(exists: Exists = Exists.Yes): Options[Path] =
         Options
-            .file("schema", Exists.Yes)
+            .file("schema", exists)
             .alias("s") ?? "Path to the rengbis schema file"
 
-    val filesArg: Args[List[Path]] =
-        Args.file("files", Exists.Yes).+ ?? "One or more files to validate"
+    def filesArg(exists: Exists = Exists.Yes): Args[List[Path]] =
+        Args.file("files", exists).+ ?? "One or more files to validate"
 
     val validateSchemaHelp: HelpDoc =
         HelpDoc.p("Validate one or more rengbis schema files for syntax errors.")
@@ -39,22 +39,24 @@ object Main extends ZIOCliDefault:
     val validateDataHelp: HelpDoc =
         HelpDoc.p("Validate data files against a rengbis schema.")
 
-    val validateSchemaCommand: Command[CliCommand] =
-        Command("validate-schema", Options.none, filesArg)
+    def validateSchemaCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
+        Command("validate-schema", Options.none, filesArg(exists))
             .withHelp(validateSchemaHelp)
-            .map { files => CliCommand.ValidateSchema(files) }
+            .map { files => RengbisCommand.ValidateSchema(files) }
 
-    val validateDataCommand: Command[CliCommand] =
-        Command("validate-data", formatOption ++ schemaOption, filesArg)
+    def validateDataCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
+        Command("validate-data", formatOption ++ schemaOption(exists), filesArg(exists))
             .withHelp(validateDataHelp)
             .map { case ((format, schemaFile), dataFiles) =>
-                CliCommand.ValidateData(format, schemaFile, dataFiles)
+                RengbisCommand.ValidateData(format, schemaFile, dataFiles)
             }
 
-    val command: Command[CliCommand] =
+    def buildCommand(exists: Exists): Command[RengbisCommand] =
         Command("rengbis")
             .withHelp(HelpDoc.p("ReNGBis - A content schema definition language for validating payloads."))
-            .subcommands(validateSchemaCommand, validateDataCommand)
+            .subcommands(validateSchemaCommand(exists), validateDataCommand(exists))
+
+    val command: Command[RengbisCommand] = buildCommand(Exists.Yes)
 
     val cliApp: CliApp[Any, Throwable, Unit] =
         CliApp.make(
@@ -64,10 +66,10 @@ object Main extends ZIOCliDefault:
             command = command
         )(execute)
 
-    def execute(cmd: CliCommand): ZIO[Any, Throwable, Unit] =
+    def execute(cmd: RengbisCommand): ZIO[Any, Throwable, Unit] =
         cmd match
-            case CliCommand.ValidateSchema(schemaFiles)                 => validateSchemas(schemaFiles)
-            case CliCommand.ValidateData(format, schemaFile, dataFiles) => validateData(format, schemaFile, dataFiles)
+            case RengbisCommand.ValidateSchema(schemaFiles)                 => validateSchemas(schemaFiles)
+            case RengbisCommand.ValidateData(format, schemaFile, dataFiles) => validateData(format, schemaFile, dataFiles)
 
     def validateSchemas(files: List[Path]): ZIO[Any, Throwable, Unit] =
         ZIO.foreach(files) { file =>
