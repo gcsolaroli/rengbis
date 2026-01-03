@@ -125,6 +125,10 @@ object Validator:
                         )
                     )
                 case value                          => ValidationResult.reportError(s"expected object value; ${ value.valueTypeDescription } found")
+        case MapValue(valueSchema)         =>
+            value match
+                case Value.ObjectWithValues(values) => ValidationResult.summarize(values.values.map(v => validateValue(valueSchema, v)))
+                case value                          => ValidationResult.reportError(s"expected map/object value; ${ value.valueTypeDescription } found")
         case NamedValueReference(_)        => ValidationResult.reportError(s"#WTF: unresolved NamedValueReference still present")
         case ImportStatement(_, _)         => ValidationResult.reportError(s"#WTF: unresolved ImportStatement still present")
         case ScopedReference(_, _)         => ValidationResult.reportError(s"#WTF: unresolved ScopedReference still present")

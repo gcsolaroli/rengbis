@@ -1,0 +1,2 @@
+# Map with text values (using ... notation)
+= { ...: text }

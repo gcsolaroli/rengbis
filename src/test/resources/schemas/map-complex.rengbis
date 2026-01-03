@@ -1,0 +1,4 @@
+# Map with object values (docker-compose services style)
+service = { name: text, port?: number }
+
+= { ...: service }

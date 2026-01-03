@@ -1,0 +1,2 @@
+# Map with number values (using … notation)
+= { …: number }

@@ -1,0 +1,5 @@
+{
+  "web": { "name": "frontend", "port": 8080 },
+  "api": { "name": "backend", "port": 3000 },
+  "db": { "name": "postgres" }
+}

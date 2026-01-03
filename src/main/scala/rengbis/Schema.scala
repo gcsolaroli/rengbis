@@ -63,6 +63,11 @@ object Schema:
             sequenceEithers(obj.map((k, s) => s.replaceReferencedValues(context*).map((k, _))).toSeq).map(cs => ObjectValue(cs.toMap))
         override def dependencies: Seq[String]                                                   = obj.flatMap((k, s) => s.dependencies).toSeq
 
+    final case class MapValue(valueSchema: Schema) extends Schema:
+        override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
+            valueSchema.replaceReferencedValues(context*).map(MapValue(_))
+        override def dependencies: Seq[String]                                                   = valueSchema.dependencies
+
     final case class NamedValueReference(reference: String) extends Schema:
         override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
             context.find((k, _) => k == reference) match
@@ -71,7 +76,7 @@ object Schema:
         override def dependencies: Seq[String]                                                   = Seq(reference)
 
     final case class ImportStatement(namespace: String, path: String) extends Schema:
-        override def dependencies: Seq[String] = Seq.empty // Imports don't have schema dependencies, only file dependencies
+        override def dependencies: Seq[String] = Seq.empty
 
     final case class ScopedReference(namespace: String, name: String) extends Schema:
         override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
@@ -108,10 +113,11 @@ object Schema:
         val whitespaces: SchemaSyntax[Unit] = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk())
         val comment: SchemaSyntax[Unit]     = (Syntax.char('#') ~ Syntax.charNotIn('\n').repeat0).unit(Chunk())
 
-        val number: SchemaSyntax[Int]      = Syntax.digit.repeat.transform(
+        val number: SchemaSyntax[Int] = Syntax.digit.repeat.transform(
             chars => chars.mkString.toInt,
             num => Chunk.fromArray(num.toString.toCharArray)
         )
+
         val emptyLines: SchemaSyntax[Unit] = (whitespaces ~ comment.optional ~ Syntax.char('\n')).repeat0.unit(Chunk())
 
         val quote: SchemaSyntax[Unit]          = Syntax.char('\"')
@@ -124,15 +130,19 @@ object Schema:
         enum ExtendedSizeConstraint extends SizeConstraint:
             case EQ, GT, GE
 
-        val smallerSizeConstrint: SchemaSyntax[SmallerSizeConstraint] = Syntax.string("<=", SmallerSizeConstraint.LE)
-            <> Syntax.string("<", SmallerSizeConstraint.LT)
+        val smallerSizeConstrint: SchemaSyntax[SmallerSizeConstraint] =
+            Syntax.string("<=", SmallerSizeConstraint.LE)
+                <> Syntax.string("<", SmallerSizeConstraint.LT)
 
-        val sizeConstraint: SchemaSyntax[SizeConstraint] = Syntax.string("==", ExtendedSizeConstraint.EQ)
-            <> Syntax.string(">=", ExtendedSizeConstraint.GE)
-            <> Syntax.string(">", ExtendedSizeConstraint.GT)
-            <> smallerSizeConstrint.widen[SizeConstraint]
+        val sizeConstraint: SchemaSyntax[SizeConstraint] =
+            Syntax.string("==", ExtendedSizeConstraint.EQ)
+                <> Syntax.string(">=", ExtendedSizeConstraint.GE)
+                <> Syntax.string(">", ExtendedSizeConstraint.GT)
+                <> smallerSizeConstrint.widen[SizeConstraint]
 
-        val sizeTextConstraints: SchemaSyntax[Chunk[TextConstraint.TextSizeConstraint]] = (Syntax.string("length", ()) ~ whitespaces ~ sizeConstraint ~ whitespaces ~ number).transform(
+        val sizeTextConstraints: SchemaSyntax[Chunk[TextConstraint.TextSizeConstraint]] = (
+            Syntax.string("length", ()) ~ whitespaces ~ sizeConstraint ~ whitespaces ~ number
+        ).transform(
             (c, n) =>
                 Chunk(
                     c match
@@ -148,7 +158,9 @@ object Schema:
                     case TextConstraint.MinLength(l) => (ExtendedSizeConstraint.GE, l)
                     case TextConstraint.MaxLength(l) => (SmallerSizeConstraint.LE, l)
         )
-            <> (number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("length", ()) ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ number).transform(
+            <> (
+                number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("length", ()) ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ number
+            ).transform(
                 (l, lc, uc, u) =>
                     (lc, uc) match
                         case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LT) => Chunk(TextConstraint.MinLength(l + 1), TextConstraint.MaxLength(u - 1))
@@ -158,7 +170,9 @@ object Schema:
                 ,
                 c => (c.head.size, SmallerSizeConstraint.LE, SmallerSizeConstraint.LE, c.tail.head.size)
             )
-            <> (number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("length", ())).transform(
+            <> (
+                number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("length", ())
+            ).transform(
                 (l, lc) =>
                     lc match
                         case SmallerSizeConstraint.LT => Chunk(TextConstraint.MinLength(l + 1))
@@ -166,26 +180,29 @@ object Schema:
                 ,
                 c => (c.head.size, SmallerSizeConstraint.LE)
             )
-        val regexTextConstraint: SchemaSyntax[TextConstraint.Constraint]                = (Syntax.string("regex", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString)
-            .transform(
-                text => TextConstraint.Regex(text),
-                c => c.pattern
-            )
-            .widen[TextConstraint.Constraint]
 
-        val formatTextConstraint: SchemaSyntax[TextConstraint.Constraint] = (Syntax.string("pattern", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString)
-            .transform(
-                text => TextConstraint.Format(text),
-                c => c.format
-            )
-            .widen[TextConstraint.Constraint]
+        val regexTextConstraint: SchemaSyntax[TextConstraint.Constraint] = (
+            Syntax.string("regex", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString
+        ).transform(
+            text => TextConstraint.Regex(text),
+            c => c.pattern
+        ).widen[TextConstraint.Constraint]
 
-        val textConstraints: SchemaSyntax[Chunk[TextConstraint.Constraint]] = sizeTextConstraints.widen[Chunk[TextConstraint.Constraint]]
-            <> regexTextConstraint.+
-            <> formatTextConstraint.+
+        val formatTextConstraint: SchemaSyntax[TextConstraint.Constraint] = (
+            Syntax.string("pattern", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString
+        ).transform(
+            text => TextConstraint.Format(text),
+            c => c.format
+        ).widen[TextConstraint.Constraint]
 
-        val textValue: SchemaSyntax[Schema.TextValue] = (Syntax.string("text", ())
-            ~ (whitespaces ~ Syntax.char('{') ~ whitespaces ~> textConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char('}')).optional).transform(
+        val textConstraints: SchemaSyntax[Chunk[TextConstraint.Constraint]] =
+            sizeTextConstraints.widen[Chunk[TextConstraint.Constraint]]
+                <> regexTextConstraint.+
+                <> formatTextConstraint.+
+
+        val textValue: SchemaSyntax[Schema.TextValue] = (
+            Syntax.string("text", ()) ~ (whitespaces ~ Syntax.char('{') ~ whitespaces ~> textConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char('}')).optional
+        ).transform(
             constraints => TextValue(constraints.map(_.flatMap(identity)).getOrElse(Chunk()).toList*),
             textValue => if textValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(textValue.constraints)))
         )
@@ -200,7 +217,9 @@ object Schema:
             s => MandatoryLabel(s),
             l => l.label
         )
-        val optionalLabel: SchemaSyntax[ObjectLabel] = (label <~ Syntax.char('?')).transform(
+        val optionalLabel: SchemaSyntax[ObjectLabel] = (
+            label <~ Syntax.char('?')
+        ).transform(
             s => OptionalLabel(s),
             l => l.label
         )
@@ -213,39 +232,54 @@ object Schema:
         val unquotedPath: SchemaSyntax[String] = Syntax.charNotIn(' ', '\t', '\r', '\n').repeat.string
         val importPath: SchemaSyntax[String]   = quotedString <> unquotedPath
 
-        val importStatement: SchemaSyntax[(String, Schema)] =
-            (label ~ whitespaces ~ Syntax.string("=>", ()) ~ whitespaces ~ Syntax.string("import", ()) ~ whitespaces ~ importPath).transform(
-                (namespace, path) => (namespace, ImportStatement(namespace, path)),
-                (namespace, schema) =>
-                    schema match
-                        case ImportStatement(ns, path) => (ns, path)
-                        case _                         => (namespace, "")
-            )
+        val importStatement: SchemaSyntax[(String, Schema)] = (
+            label ~ whitespaces ~ Syntax.string("=>", ()) ~ whitespaces ~ Syntax.string("import", ()) ~ whitespaces ~ importPath
+        ).transform(
+            (namespace, path) => (namespace, ImportStatement(namespace, path)),
+            (namespace, schema) =>
+                schema match
+                    case ImportStatement(ns, path) => (ns, path)
+                    case _                         => (namespace, "")
+        )
 
-        val scopedReference: SchemaSyntax[Schema.ScopedReference] =
-            (label ~ Syntax.char('.') ~ label).transform(
-                (namespace, name) => ScopedReference(namespace, name),
-                ref => (ref.namespace, ref.name)
-            )
+        val scopedReference: SchemaSyntax[Schema.ScopedReference] = (
+            label ~ Syntax.char('.') ~ label
+        ).transform(
+            (namespace, name) => ScopedReference(namespace, name),
+            ref => (ref.namespace, ref.name)
+        )
 
-        val namedValueReference: SchemaSyntax[Schema.NamedValueReference] = ((Syntax.letter ~ Syntax.alphaNumeric.repeat0).string).transform(
+        val namedValueReference: SchemaSyntax[Schema.NamedValueReference] = (
+            (Syntax.letter ~ Syntax.alphaNumeric.repeat0).string
+        ).transform(
             label => NamedValueReference(label),
             schema => schema.reference
         )
 
-        val objectValue: SchemaSyntax[Schema.ObjectValue] = (Syntax.char('{') ~>
-            (emptyLines ~ whitespaces ~
-                objectLabel ~ Syntax.char(':') ~ whitespaces ~ items).repeatWithSep(whitespaces ~ (Syntax.char(',') <> emptyLines)) ~ whitespaces ~ emptyLines
-            <~ whitespaces ~ Syntax.char('}'))
-            .transform(
-                keys => Schema.ObjectValue(keys.toMap),
-                obj => Chunk.fromIterable(obj.obj)
-            )
+        val objectValue: SchemaSyntax[Schema.ObjectValue] = (
+            Syntax.char('{') ~> (emptyLines ~ whitespaces ~
+                objectLabel ~ Syntax.char(':') ~ whitespaces ~ items).repeatWithSep(whitespaces ~ (Syntax.char(',') <> emptyLines))
+                ~ whitespaces ~ emptyLines <~ whitespaces ~ Syntax.char('}')
+        ).transform(
+            keys => Schema.ObjectValue(keys.toMap),
+            obj => Chunk.fromIterable(obj.obj)
+        )
+
+        val mapSpreadKey: SchemaSyntax[Unit]        = Syntax.string("...", ()) <> Syntax.string("…", ())
+        val mapValue: SchemaSyntax[Schema.MapValue] = (
+            Syntax.char('{') ~> whitespaces
+                ~ mapSpreadKey ~ whitespaces ~ Syntax.char(':') ~ whitespaces ~ items
+                ~ whitespaces <~ Syntax.char('}')
+        ).transform(
+            valueSchema => Schema.MapValue(valueSchema),
+            mapVal => mapVal.valueSchema
+        )
 
         val item: SchemaSyntax[Schema] = booleanValue.widen[Schema]
             <> numericValue.widen[Schema]
             <> textValue.widen[Schema]
             <> givenTextValue.widen[Schema]
+            <> mapValue.widen[Schema]
             <> objectValue.widen[Schema]
             <> (Syntax.char('(') ~ whitespaces ~> alternativeValues <~ whitespaces ~ Syntax.char(')')).widen[Schema]
             <> scopedReference.widen[Schema]

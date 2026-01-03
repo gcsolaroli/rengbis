@@ -92,6 +92,17 @@ Besides the basic value types, it also shows the way to define alternative optio
 This schema defines a dictionaly value that **should** contain a `name` (of type `text`), **may** (`?`) contain an `age` (of type `number`), and **should** contain some `hobbies` (list, possibly empty – `*`, of `text`).
 The comma to separate the different keys is required only when listing multiple values on the same line; when separating values in new lines, separatinig commas are optional.
 
+### Objects with uncostraint keys
+It's also possible to define structures with *free* keys; in order to express this constraint, just use the `…` (or `...`) value for the key:
+```rengbis
+service = { name: text, port?: number }
+= {
+    name: text,
+    services: { …: service }
+}
+```
+
+
 ## Named structures
 ```rengbis
 foo = {
