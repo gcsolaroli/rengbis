@@ -16,8 +16,8 @@ object Schema:
 
     object TextConstraint:
         sealed abstract class Constraint
-        case class Regex(regex: scala.util.matching.Regex) extends Constraint
-        case class Format(format: String)                  extends Constraint
+        case class Regex(pattern: String) extends Constraint
+        case class Format(format: String) extends Constraint
 
         sealed abstract class TextSizeConstraint(val size: Int) extends Constraint
         case class MinLength(override val size: Int)            extends TextSizeConstraint(size)
@@ -70,8 +70,22 @@ object Schema:
                 case None         => Right(this)
         override def dependencies: Seq[String]                                                   = Seq(reference)
 
+    final case class ImportStatement(namespace: String, path: String) extends Schema:
+        override def dependencies: Seq[String] = Seq.empty // Imports don't have schema dependencies, only file dependencies
+
+    final case class ScopedReference(namespace: String, name: String) extends Schema:
+        override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
+            val scopedName = if name.isEmpty then namespace else s"$namespace.$name"
+            context.find((k, _) => k == scopedName) match
+                case Some((k, s)) => Right(s)
+                case None         => Right(this)
+        override def dependencies: Seq[String]                                                   = Seq(if name.isEmpty then namespace else s"$namespace.$name")
+
     def parse(schemaDefinition: String): Either[String, Schema] =
         SchemaSyntax.parse(schemaDefinition)
+
+    def parseFile(path: java.nio.file.Path): Either[String, Schema] =
+        SchemaLoader.loadAndResolve(path).map(_.rootSchema)
 
     def sequenceEithers[E, A](list: Seq[Either[E, A]]): Either[E, Seq[A]] =
         list.foldLeft[Either[E, Seq[A]]](Right(Seq.empty)) { (acc, current) =>
@@ -154,8 +168,8 @@ object Schema:
             )
         val regexTextConstraint: SchemaSyntax[TextConstraint.Constraint]                = (Syntax.string("regex", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString)
             .transform(
-                text => TextConstraint.Regex(text.r),
-                c => c.regex.regex
+                text => TextConstraint.Regex(text),
+                c => c.pattern
             )
             .widen[TextConstraint.Constraint]
 
@@ -196,6 +210,24 @@ object Schema:
 
         val namedValue: SchemaSyntax[(String, Schema)] = label ~ whitespaces ~ valueDefinition
 
+        val unquotedPath: SchemaSyntax[String] = Syntax.charNotIn(' ', '\t', '\r', '\n').repeat.string
+        val importPath: SchemaSyntax[String]   = quotedString <> unquotedPath
+
+        val importStatement: SchemaSyntax[(String, Schema)] =
+            (label ~ whitespaces ~ Syntax.string("=>", ()) ~ whitespaces ~ Syntax.string("import", ()) ~ whitespaces ~ importPath).transform(
+                (namespace, path) => (namespace, ImportStatement(namespace, path)),
+                (namespace, schema) =>
+                    schema match
+                        case ImportStatement(ns, path) => (ns, path)
+                        case _                         => (namespace, "")
+            )
+
+        val scopedReference: SchemaSyntax[Schema.ScopedReference] =
+            (label ~ Syntax.char('.') ~ label).transform(
+                (namespace, name) => ScopedReference(namespace, name),
+                ref => (ref.namespace, ref.name)
+            )
+
         val namedValueReference: SchemaSyntax[Schema.NamedValueReference] = ((Syntax.letter ~ Syntax.alphaNumeric.repeat0).string).transform(
             label => NamedValueReference(label),
             schema => schema.reference
@@ -214,9 +246,10 @@ object Schema:
             <> numericValue.widen[Schema]
             <> textValue.widen[Schema]
             <> givenTextValue.widen[Schema]
-            <> namedValueReference.widen[Schema]
-            <> (Syntax.char('(') ~ alternativeValues ~ Syntax.char(')')).widen[Schema]
             <> objectValue.widen[Schema]
+            <> (Syntax.char('(') ~ whitespaces ~> alternativeValues <~ whitespaces ~ Syntax.char(')')).widen[Schema]
+            <> scopedReference.widen[Schema]
+            <> namedValueReference.widen[Schema]
 
         val listOfValues: SchemaSyntax[Schema.ListOfValues] = (item <~ Syntax.char('*')).transform(
             itemSchema => Schema.ListOfValues(itemSchema),
@@ -311,25 +344,31 @@ object Schema:
             <> tupleValues.widen[Schema]
             <> item
 
-        val rootKey                              = "root"
+        val rootKey = "root"
+
         val root: SchemaSyntax[(String, Schema)] = valueDefinition.transform(
             s => (rootKey, s),
             (k, s) => s
         )
 
-        val schema: SchemaSyntax[(Chunk[(String, Schema)], (String, Schema))] =
+        val definition: SchemaSyntax[(String, Schema)] = importStatement <> namedValue
+
+        val schema: SchemaSyntax[(Chunk[(String, Schema)], Option[(String, Schema)])] =
             (emptyLines
-                ~ namedValue.repeatWithSep0(emptyLines)
+                ~ definition.repeatWithSep0(emptyLines)
                 ~ emptyLines
-                ~ root
+                ~ root.optional
                 ~ emptyLines ~ whitespaces) <~ Syntax.end
 
         def parse(definition: String): Either[String, Schema] = schema
             .parseString(definition)
             .left
             .map(_.pretty)
-            .map((namedValues, rootSchema) => (namedValues :+ rootSchema))
-            .flatMap(resolveReferencedSchemas)
+            .flatMap((definitions, rootSchema) =>
+                rootSchema match
+                    case Some(root) => resolveReferencedSchemas(definitions :+ root)
+                    case None       => Left("No root schema defined (use '= ...' to define root schema)")
+            )
 
         def resolveReferencedSchemas(definitions: Chunk[(String, Schema)]): Either[String, Schema] =
             val referencedSchemas                                = definitions.map((k, s) => (k, s, s.dependencies))

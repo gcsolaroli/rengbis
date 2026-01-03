@@ -74,13 +74,12 @@ object Main extends ZIOCliDefault:
     def validateSchemas(files: List[Path]): ZIO[Any, Throwable, Unit] =
         ZIO.foreach(files) { file =>
             for
-                content <- ZIO.attempt(Files.readString(file))
-                result   = Schema.parse(content)
-                _       <- result match
-                               case Right(_)    =>
-                                   Console.printLine(s"✓ ${ file.getFileName }: valid")
-                               case Left(error) =>
-                                   Console.printLine(s"✗ ${ file.getFileName }: $error")
+                result <- ZIO.succeed(Schema.parseFile(file))
+                _      <- result match
+                              case Right(_)    =>
+                                  Console.printLine(s"✓ ${ file.getFileName }: valid")
+                              case Left(error) =>
+                                  Console.printLine(s"✗ ${ file.getFileName }: $error")
             yield result.isRight
         }.flatMap { results =>
             val total   = results.size
@@ -92,24 +91,23 @@ object Main extends ZIOCliDefault:
 
     def validateData(format: Format, schemaFile: Path, dataFiles: List[Path]): ZIO[Any, Throwable, Unit] =
         for
-            schemaContent <- ZIO.attempt(Files.readString(schemaFile))
-            schema        <- ZIO.fromEither(Schema.parse(schemaContent)).mapError(e => new RuntimeException(s"Failed to parse schema ${ schemaFile.getFileName }: $e"))
-            parser         = format match
-                                 case Format.Json => DataParsers.json
-                                 case Format.Yaml => DataParsers.yaml
-                                 case Format.Xml  => DataParsers.xml
-            results       <- ZIO.foreach(dataFiles) { file =>
-                                 for
-                                     content <- ZIO.attempt(Files.readString(file))
-                                     result   = Validator.validateString(parser)(schema, content)
-                                     _       <-
-                                         if result.isValid then Console.printLine(s"✓ ${ file.getFileName }: valid")
-                                         else Console.printLine(s"✗ ${ file.getFileName }:\n${ result.errorMessage }")
-                                 yield result.isValid
-                             }
-            total          = results.size
-            valid          = results.count(identity)
-            invalid        = total - valid
-            _             <- Console.printLine(s"\nSummary: $valid valid, $invalid invalid out of $total file(s)")
-            _             <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
+            schema  <- ZIO.fromEither(Schema.parseFile(schemaFile)).mapError(e => new RuntimeException(s"Failed to parse schema ${ schemaFile.getFileName }: $e"))
+            parser   = format match
+                           case Format.Json => DataParsers.json
+                           case Format.Yaml => DataParsers.yaml
+                           case Format.Xml  => DataParsers.xml
+            results <- ZIO.foreach(dataFiles) { file =>
+                           for
+                               content <- ZIO.attempt(Files.readString(file))
+                               result   = Validator.validateString(parser)(schema, content)
+                               _       <-
+                                   if result.isValid then Console.printLine(s"✓ ${ file.getFileName }: valid")
+                                   else Console.printLine(s"✗ ${ file.getFileName }:\n${ result.errorMessage }")
+                           yield result.isValid
+                       }
+            total    = results.size
+            valid    = results.count(identity)
+            invalid  = total - valid
+            _       <- Console.printLine(s"\nSummary: $valid valid, $invalid invalid out of $total file(s)")
+            _       <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
         yield ()

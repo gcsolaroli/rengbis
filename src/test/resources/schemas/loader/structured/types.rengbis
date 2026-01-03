@@ -1,0 +1,9 @@
+# Type definitions library with root schema
+
+username = text { 3 <= length <= 20 }
+password = text { 8 <= length }
+
+= {
+    user: username,
+    pass: password
+}

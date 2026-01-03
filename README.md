@@ -180,6 +180,25 @@ Values would have to be constraint at least on **range of values**, number of de
 ## Comments
 Anything after a `#` character, up to the end of the line, is ignored by the parser and thus treated as a comment.
 
+## Imports
+It is possible to reference external files (currently only with a relative path) in order to *include* external definitions in the current scope.
+
+The syntax is pretty simple:
+```rengbis
+types => import ./types.rengbis
+```
+
+This defines a new *scope* `types` whose content is loaded from the `./types.rengbis` file.
+After the import, newly imported definitions may be used adding the `types.` prefix:
+```rengbis
+types => import ./types.rengbis
+
+= {
+    username: types.username
+}
+```
+
+The `root` element of the imported schema definition may also be used, just referring to the *scope* name.
 
 # Status of the project
 This is a very early prototype, shared only to get some feedback; besides the few test included in the code base, it has not be used anywhere else.

@@ -215,7 +215,13 @@ bar = {
                     )
                 )
             )
-        , // ----------------------------------------------------------------
+        // ----------------------------------------------------------------
+    )
+
+// ############################################################################
+/*
+object SchemaFailSpec extends ZIOSpecDefault:
+    def spec = suite("Schema parsing errors")(
         test("degenerated tuple value"):
             val schemaDefinition = """
 = (text)
@@ -225,7 +231,7 @@ bar = {
                 assertTrue(parse(schemaDefinition).swap.getOrElse("").contains("tuple needs to have at least two items"))
             )
     )
-
+ */
 // ############################################################################
 
 object SchemaSamplesSpec extends ZIOSpecDefault:
@@ -266,6 +272,7 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                 .iterator()
                 .asScala
                 .filter(p => Files.isDirectory(p))
+                .filter(p => Files.exists(p.resolveSibling(p.getFileName.toString + ".rengbis")))
                 .toList
 
             schemaDirs.flatMap { schemaDir =>

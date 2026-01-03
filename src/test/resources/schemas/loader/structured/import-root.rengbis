@@ -1,0 +1,8 @@
+# Imports a library that has a root schema
+
+types => import ./types.rengbis
+
+= {
+    credentials: types,
+    username: types.username
+}

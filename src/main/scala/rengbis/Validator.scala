@@ -57,7 +57,7 @@ object Validator:
         case TextConstraint.MinLength(size) => if (text.length >= size) then ValidationResult.valid else ValidationResult.reportError(s"minLength constraint (${ size }) not met: ${ text.length() }")
         case TextConstraint.MaxLength(size) => if (text.length <= size) then ValidationResult.valid else ValidationResult.reportError(s"maxLength constraint (${ size }) not met: ${ text.length() }")
         case TextConstraint.Length(size)    => if (text.length == size) then ValidationResult.valid else ValidationResult.reportError(s"length constraint (${ size }) not met: ${ text.length() }")
-        case TextConstraint.Regex(regex)    => if regex.matches(text) then ValidationResult.valid else ValidationResult.reportError(s"regex (${ regex.regex }) not matching")
+        case TextConstraint.Regex(pattern)  => if pattern.r.matches(text) then ValidationResult.valid else ValidationResult.reportError(s"regex ($pattern) not matching")
         case TextConstraint.Format(format)  => if formatToRegex(format).matches(text) then ValidationResult.valid else ValidationResult.reportError(s"format (${ format }) not matching")
 
     def validateListConstraints[A](constraint: ListConstraint.Constraint, list: Chunk[A]) =
@@ -126,3 +126,5 @@ object Validator:
                     )
                 case value                          => ValidationResult.reportError(s"expected object value; ${ value.valueTypeDescription } found")
         case NamedValueReference(_)        => ValidationResult.reportError(s"#WTF: unresolved NamedValueReference still present")
+        case ImportStatement(_, _)         => ValidationResult.reportError(s"#WTF: unresolved ImportStatement still present")
+        case ScopedReference(_, _)         => ValidationResult.reportError(s"#WTF: unresolved ScopedReference still present")

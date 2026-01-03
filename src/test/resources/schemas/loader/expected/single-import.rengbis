@@ -1,0 +1,9 @@
+# Expected: fully resolved schema for single-import.rengbis
+
+= {
+    user: {
+        name: text,
+        email: text { regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }
+    },
+    contactEmail: text { regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }
+}

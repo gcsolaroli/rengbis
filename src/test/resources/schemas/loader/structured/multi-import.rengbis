@@ -1,0 +1,9 @@
+# Uses multiple imports
+
+lib => import "common.rengbis"
+types => import "types.rengbis"
+
+= {
+    person: lib.person,
+    credentials: types
+}

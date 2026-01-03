@@ -1,0 +1,9 @@
+# Expected: fully resolved schema for import-root.rengbis
+
+= {
+    credentials: {
+        user: text { 3 <= length <= 20 },
+        pass: text { 8 <= length }
+    },
+    username: text { 3 <= length <= 20 }
+}

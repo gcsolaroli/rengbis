@@ -1,0 +1,8 @@
+# Imports a library and uses its definitions
+
+lib => import "common.rengbis"
+
+= {
+    user: lib.person,
+    contactEmail: lib.email
+}
