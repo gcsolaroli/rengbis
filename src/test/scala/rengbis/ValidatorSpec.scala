@@ -195,4 +195,117 @@ object ValidatorSpec extends ZIOSpecDefault:
                         assertTrue(validateJsonString(schema, """{"name": "John", "age": 30, "hobbies": ["reading"]}""").isValid)
                     )
                 case Left(value)   => assertTrue(value == ""))
+        ,
+        test("number constraints (integer)"):
+            val schemaDefinition = """= number { integer }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, "42").isValid),
+                        assertTrue(validateJsonString(schema, "-10").isValid),
+                        assertTrue(validateJsonString(schema, "0").isValid),
+                        assertTrue(validateJsonString(schema, "3.14").isValid == false),
+                        assertTrue(validateJsonString(schema, "0.5").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("number constraints (min value)"):
+            val schemaDefinition = """= number { value >= 0 }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, "0").isValid),
+                        assertTrue(validateJsonString(schema, "100").isValid),
+                        assertTrue(validateJsonString(schema, "0.5").isValid),
+                        assertTrue(validateJsonString(schema, "-1").isValid == false),
+                        assertTrue(validateJsonString(schema, "-0.001").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("number constraints (min value) - exclusive"):
+            val schemaDefinition = """= number { value > 0 }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, "0").isValid == false),
+                        assertTrue(validateJsonString(schema, "100").isValid),
+                        assertTrue(validateJsonString(schema, "0.5").isValid),
+                        assertTrue(validateJsonString(schema, "-1").isValid == false),
+                        assertTrue(validateJsonString(schema, "-0.001").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("number constraints (max value)"):
+            val schemaDefinition = """= number { value <= 100 }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, "100").isValid),
+                        assertTrue(validateJsonString(schema, "0").isValid),
+                        assertTrue(validateJsonString(schema, "-50").isValid),
+                        assertTrue(validateJsonString(schema, "101").isValid == false),
+                        assertTrue(validateJsonString(schema, "100.001").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("number constraints (range)"):
+            val schemaDefinition = """= number { 0 <= value <= 100 }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, "0").isValid),
+                        assertTrue(validateJsonString(schema, "50").isValid),
+                        assertTrue(validateJsonString(schema, "100").isValid),
+                        assertTrue(validateJsonString(schema, "-1").isValid == false),
+                        assertTrue(validateJsonString(schema, "101").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("number constraints (exact value)"):
+            val schemaDefinition = """= number { value == 42 }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, "42").isValid),
+                        assertTrue(validateJsonString(schema, "41").isValid == false),
+                        assertTrue(validateJsonString(schema, "43").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("number constraints (combined integer and range)"):
+            val schemaDefinition = """= number { integer, 1 <= value <= 12 }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, "1").isValid),
+                        assertTrue(validateJsonString(schema, "6").isValid),
+                        assertTrue(validateJsonString(schema, "12").isValid),
+                        assertTrue(validateJsonString(schema, "0").isValid == false),
+                        assertTrue(validateJsonString(schema, "13").isValid == false),
+                        assertTrue(validateJsonString(schema, "6.5").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("number constraints (negative values)"):
+            val schemaDefinition = """= number { value >= -10 }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, "-10").isValid),
+                        assertTrue(validateJsonString(schema, "-5").isValid),
+                        assertTrue(validateJsonString(schema, "0").isValid),
+                        assertTrue(validateJsonString(schema, "-11").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("number constraints (decimal bounds)"):
+            val schemaDefinition = """= number { value >= 0.5 }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, "0.5").isValid),
+                        assertTrue(validateJsonString(schema, "1").isValid),
+                        assertTrue(validateJsonString(schema, "0.49").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
     )

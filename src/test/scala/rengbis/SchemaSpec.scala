@@ -33,9 +33,20 @@ object SchemaSpec extends ZIOSpecDefault:
         parseTest("""= text { length > 10 }""", TextValue(TextConstraint.MinLength(11))),
         parseTest("""= text { length <= 100 }""", TextValue(TextConstraint.MaxLength(100))),
         parseTest("""= text { length < 100 }""", TextValue(TextConstraint.MaxLength(99))),
-
-        // parseTest("""= text { regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})" }""", TextValue(TextConstraint.Regex("([0-9]{4}-[0-9]{2}-[0-9]{2})".r))),
-
+        parseTest("""= number { integer }""", NumericValue(NumericConstraint.Integer)),
+        parseTest("""= number { value >= 0 }""", NumericValue(NumericConstraint.MinValue(0))),
+        parseTest("""= number { value > 0 }""", NumericValue(NumericConstraint.MinValueExclusive(0))),
+        parseTest("""= number { value <= 100 }""", NumericValue(NumericConstraint.MaxValue(100))),
+        parseTest("""= number { value < 100 }""", NumericValue(NumericConstraint.MaxValueExclusive(100))),
+        parseTest("""= number { value == 42 }""", NumericValue(NumericConstraint.ExactValue(42))),
+        parseTest("""= number { 0 <= value <= 100 }""", NumericValue(NumericConstraint.MinValue(0), NumericConstraint.MaxValue(100))),
+        parseTest("""= number { 0 < value < 100 }""", NumericValue(NumericConstraint.MinValueExclusive(0), NumericConstraint.MaxValueExclusive(100))),
+        parseTest("""= number { 0 < value <= 100 }""", NumericValue(NumericConstraint.MinValueExclusive(0), NumericConstraint.MaxValue(100))),
+        parseTest("""= number { 0 <= value < 100 }""", NumericValue(NumericConstraint.MinValue(0), NumericConstraint.MaxValueExclusive(100))),
+        parseTest("""= number { integer, value >= 0 }""", NumericValue(NumericConstraint.Integer, NumericConstraint.MinValue(0))),
+        parseTest("""= number { integer, 1 <= value <= 12 }""", NumericValue(NumericConstraint.Integer, NumericConstraint.MinValue(1), NumericConstraint.MaxValue(12))),
+        parseTest("""= number { value >= -10 }""", NumericValue(NumericConstraint.MinValue(-10))),
+        parseTest("""= number { value >= 0.5 }""", NumericValue(NumericConstraint.MinValue(BigDecimal("0.5")))),
         parseTest("""= text { 10 <= length <= 100 }*""", ListOfValues(TextValue(TextConstraint.MinLength(10), TextConstraint.MaxLength(100)))),
         parseTest("""= text{10}""", ListOfValues(TextValue(), ListConstraint.ExactSize(10))),
         parseTest(

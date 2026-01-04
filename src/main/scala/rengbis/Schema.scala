@@ -30,18 +30,29 @@ object Schema:
         case class MaxSize(value: Int)   extends Constraint
         case class ExactSize(value: Int) extends Constraint
 
+    object NumericConstraint:
+        sealed abstract class Constraint
+        case object Integer extends Constraint
+
+        sealed abstract class NumericValueConstraint(val bound: BigDecimal) extends Constraint
+        case class MinValue(override val bound: BigDecimal)                 extends NumericValueConstraint(bound)
+        case class MinValueExclusive(override val bound: BigDecimal)        extends NumericValueConstraint(bound)
+        case class MaxValue(override val bound: BigDecimal)                 extends NumericValueConstraint(bound)
+        case class MaxValueExclusive(override val bound: BigDecimal)        extends NumericValueConstraint(bound)
+        case class ExactValue(override val bound: BigDecimal)               extends NumericValueConstraint(bound)
+
     // ------------------------------------------------------------------------
 
     sealed abstract class Schema:
         def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] = Right(this)
         def dependencies: Seq[String]                                                   = Seq.empty
 
-    final case class Fail()                                             extends Schema
-    final case class BooleanValue()                                     extends Schema
-    final case class TextValue(constraints: TextConstraint.Constraint*) extends Schema
-    final case class GivenTextValue(value: String)                      extends Schema
-    final case class NumericValue()                                     extends Schema
-    final case class EnumValues(values: String*)                        extends Schema
+    final case class Fail()                                                   extends Schema
+    final case class BooleanValue()                                           extends Schema
+    final case class TextValue(constraints: TextConstraint.Constraint*)       extends Schema
+    final case class GivenTextValue(value: String)                            extends Schema
+    final case class NumericValue(constraints: NumericConstraint.Constraint*) extends Schema
+    final case class EnumValues(values: String*)                              extends Schema
 
     final case class ListOfValues(schema: Schema, constraints: ListConstraint.Constraint*) extends Schema:
         override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
@@ -209,7 +220,82 @@ object Schema:
 
         val booleanValue: SchemaSyntax[Schema.BooleanValue]     = Syntax.string("boolean", Schema.BooleanValue())
         val givenTextValue: SchemaSyntax[Schema.GivenTextValue] = quotedString.transform(s => Schema.GivenTextValue(s), v => v.value)
-        val numericValue: SchemaSyntax[Schema.NumericValue]     = Syntax.string("number", Schema.NumericValue())
+
+        val decimalNumber: SchemaSyntax[BigDecimal] = (
+            Syntax.charIn('-').optional ~ Syntax.digit.repeat ~ (Syntax.char('.') ~ Syntax.digit.repeat).optional
+        ).string.transform(
+            str => BigDecimal(str),
+            num => num.toString
+        )
+
+        val integerConstraint: SchemaSyntax[NumericConstraint.Constraint] = Syntax.string("integer", NumericConstraint.Integer).widen[NumericConstraint.Constraint]
+
+        val valueNumericConstraints: SchemaSyntax[Chunk[NumericConstraint.NumericValueConstraint]] = (
+            Syntax.string("value", ()) ~ whitespaces ~ sizeConstraint ~ whitespaces ~ decimalNumber
+        ).transform(
+            (c, n) =>
+                Chunk(
+                    c match
+                        case ExtendedSizeConstraint.EQ => NumericConstraint.ExactValue(n)
+                        case ExtendedSizeConstraint.GT => NumericConstraint.MinValueExclusive(n)
+                        case ExtendedSizeConstraint.GE => NumericConstraint.MinValue(n)
+                        case SmallerSizeConstraint.LT  => NumericConstraint.MaxValueExclusive(n)
+                        case SmallerSizeConstraint.LE  => NumericConstraint.MaxValue(n)
+                ),
+            c =>
+                c.head match
+                    case NumericConstraint.ExactValue(v)        => (ExtendedSizeConstraint.EQ, v)
+                    case NumericConstraint.MinValueExclusive(v) => (ExtendedSizeConstraint.GT, v)
+                    case NumericConstraint.MinValue(v)          => (ExtendedSizeConstraint.GE, v)
+                    case NumericConstraint.MaxValueExclusive(v) => (SmallerSizeConstraint.LT, v)
+                    case NumericConstraint.MaxValue(v)          => (SmallerSizeConstraint.LE, v)
+        )
+            <> (
+                decimalNumber ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("value", ()) ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ decimalNumber
+            ).transform(
+                (l, lc, uc, u) =>
+                    (lc, uc) match
+                        case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LT) => Chunk(NumericConstraint.MinValueExclusive(l), NumericConstraint.MaxValueExclusive(u))
+                        case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LE) => Chunk(NumericConstraint.MinValueExclusive(l), NumericConstraint.MaxValue(u))
+                        case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LT) => Chunk(NumericConstraint.MinValue(l), NumericConstraint.MaxValueExclusive(u))
+                        case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LE) => Chunk(NumericConstraint.MinValue(l), NumericConstraint.MaxValue(u))
+                ,
+                c =>
+                    val (minBound, minOp) = c.head match
+                        case NumericConstraint.MinValueExclusive(v) => (v, SmallerSizeConstraint.LT)
+                        case NumericConstraint.MinValue(v)          => (v, SmallerSizeConstraint.LE)
+                        case other                                  => (other.bound, SmallerSizeConstraint.LE)
+                    val (maxBound, maxOp) = c.tail.head match
+                        case NumericConstraint.MaxValueExclusive(v) => (v, SmallerSizeConstraint.LT)
+                        case NumericConstraint.MaxValue(v)          => (v, SmallerSizeConstraint.LE)
+                        case other                                  => (other.bound, SmallerSizeConstraint.LE)
+                    (minBound, minOp, maxOp, maxBound)
+            )
+            <> (
+                decimalNumber ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("value", ())
+            ).transform(
+                (l, lc) =>
+                    lc match
+                        case SmallerSizeConstraint.LT => Chunk(NumericConstraint.MinValueExclusive(l))
+                        case SmallerSizeConstraint.LE => Chunk(NumericConstraint.MinValue(l))
+                ,
+                c =>
+                    c.head match
+                        case NumericConstraint.MinValueExclusive(v) => (v, SmallerSizeConstraint.LT)
+                        case NumericConstraint.MinValue(v)          => (v, SmallerSizeConstraint.LE)
+                        case other                                  => (other.bound, SmallerSizeConstraint.LE)
+            )
+
+        val numericConstraints: SchemaSyntax[Chunk[NumericConstraint.Constraint]] =
+            valueNumericConstraints.widen[Chunk[NumericConstraint.Constraint]]
+                <> integerConstraint.+
+
+        val numericValue: SchemaSyntax[Schema.NumericValue] = (
+            Syntax.string("number", ()) ~ (whitespaces ~ Syntax.char('{') ~ whitespaces ~> numericConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char('}')).optional
+        ).transform(
+            constraints => NumericValue(constraints.map(_.flatMap(identity)).getOrElse(Chunk()).toList*),
+            numericValue => if numericValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(numericValue.constraints)))
+        )
 
         val label: SchemaSyntax[String] = (Syntax.letter ~ (Syntax.alphaNumeric <> Syntax.charIn("_-")).repeat0).string
 

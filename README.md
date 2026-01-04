@@ -183,10 +183,25 @@ The current implementation handles these format specifiers:
 ```
 List values may be constrainted in the number of items they contain.
 
-## Number costraints - MISSING
-The options for numeric constraints are way more articulated than what has already been implemented for text and list values, and they will require some more thoughts on how to define them.
-Nothing is conceptually difficult, but will probably require a lot of tries before finding a satisfying arrangement.
-Values would have to be constraint at least on **range of values**, number of decimal digits, precision, scale; more option may emerge while working on the definition.
+## Number costraints
+Number definitions support two kind of constraints: *type* and *range*.
+For the *type*, there is currently just one option that can be specified, and that is 'integer'.
+```rengbis
+= number { integer }
+```
+
+This defines that the value must be integer, with no decimals digits.
+
+To specify the *range* of legit values, the syntax mimics the one used to specify the `length` of `text` values:
+```rengbis
+positiveValue = number { value > 0 }
+positiveInteger = number { integer, value > 0 }
+
+reservedPortNumber = number { integer, 0 <= value < 1024 }
+registeredPortNumber = number { integer, 1024 <= value < 49152 }
+ephemeralPortNumber = number { integer, 49152 <= value <= 65535 }
+```
+
 
 ## Comments
 Anything after a `#` character, up to the end of the line, is ignored by the parser and thus treated as a comment.

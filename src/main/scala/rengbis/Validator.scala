@@ -67,6 +67,14 @@ object Validator:
             case ListConstraint.MaxSize(maxSize)     => if (size <= maxSize) then ValidationResult.valid else ValidationResult.reportError(s"list maximum size constraint (${ maxSize }) not met: ${ size }")
             case ListConstraint.ExactSize(exactSize) => if (size == exactSize) then ValidationResult.valid else ValidationResult.reportError(s"list exact size constraint (${ exactSize }) not met: ${ size }")
 
+    def validateNumericConstraints(constraint: NumericConstraint.Constraint, value: BigDecimal) = constraint match
+        case NumericConstraint.Integer                => if value.isWhole then ValidationResult.valid else ValidationResult.reportError(s"integer constraint not met: ${ value } is not an integer")
+        case NumericConstraint.MinValue(min)          => if value >= min then ValidationResult.valid else ValidationResult.reportError(s"minimum value constraint (>= ${ min }) not met: ${ value }")
+        case NumericConstraint.MinValueExclusive(min) => if value > min then ValidationResult.valid else ValidationResult.reportError(s"minimum value constraint (> ${ min }) not met: ${ value }")
+        case NumericConstraint.MaxValue(max)          => if value <= max then ValidationResult.valid else ValidationResult.reportError(s"maximum value constraint (<= ${ max }) not met: ${ value }")
+        case NumericConstraint.MaxValueExclusive(max) => if value < max then ValidationResult.valid else ValidationResult.reportError(s"maximum value constraint (< ${ max }) not met: ${ value }")
+        case NumericConstraint.ExactValue(exact)      => if value == exact then ValidationResult.valid else ValidationResult.reportError(s"exact value constraint (${ exact }) not met: ${ value }")
+
     def validateValue(schema: Schema, value: Value): ValidationResult = schema match
         case Fail()                        => ValidationResult.reportError(s"fail value")
         case BooleanValue()                =>
@@ -81,14 +89,14 @@ object Validator:
             value match
                 case Value.TextValue(value) => if (value == givenValue) then ValidationResult.valid else ValidationResult.reportError(s"expected value '${ givenValue }', found '${ value }'")
                 case _                      => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case NumericValue()                =>
+        case NumericValue(constraints*)    =>
             value match
-                case Value.NumberValue(value) => ValidationResult.valid
-                case Value.TextValue(value)   =>
-                    Try(value.toInt) match
-                        case Success(_) => ValidationResult.valid
-                        case Failure(e) => ValidationResult.reportError(e.getMessage())
-                case _                        => ValidationResult.reportError(s"expected numeric value; ${ value.valueTypeDescription } found [value: ${ value }]")
+                case Value.NumberValue(numValue) => ValidationResult.summarize(constraints.map(c => validateNumericConstraints(c, numValue)))
+                case Value.TextValue(textValue)  =>
+                    Try(BigDecimal(textValue)) match
+                        case Success(numValue) => ValidationResult.summarize(constraints.map(c => validateNumericConstraints(c, numValue)))
+                        case Failure(e)        => ValidationResult.reportError(e.getMessage())
+                case _                           => ValidationResult.reportError(s"expected numeric value; ${ value.valueTypeDescription } found [value: ${ value }]")
         case EnumValues(values*)           =>
             value match
                 case Value.TextValue(value) => if (values.contains(value)) then ValidationResult.valid else ValidationResult.reportError(s"enum type does not include provided value: '${ value }'")
