@@ -1,0 +1,5 @@
+service = { name: text, port?: number }
+= {
+    name: text,
+    services: { …: service }
+}

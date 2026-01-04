@@ -98,7 +98,7 @@ It's also possible to define structures with *free* keys; in order to express th
 service = { name: text, port?: number }
 = {
     name: text,
-    services: [ …: service ]
+    services: { …: service }
 }
 ```
 

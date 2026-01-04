@@ -1,0 +1,8 @@
+name: "foo"
+services:
+    service_1:
+        name: "service_1"
+        port: 10000
+    service_2:
+        name: "service_2"
+        port: 10000
