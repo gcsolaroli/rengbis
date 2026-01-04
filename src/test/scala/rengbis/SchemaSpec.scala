@@ -48,10 +48,45 @@ object SchemaSpec extends ZIOSpecDefault:
         parseTest("""= number [ value >= -10 ]""", NumericValue(NumericConstraint.MinValue(-10))),
         parseTest("""= number [ value >= 0.5 ]""", NumericValue(NumericConstraint.MinValue(BigDecimal("0.5")))),
         parseTest("""= text [ 10 <= length <= 100 ]*""", ListOfValues(TextValue(TextConstraint.MinLength(10), TextConstraint.MaxLength(100)))),
-        parseTest("""= text{10}""", ListOfValues(TextValue(), ListConstraint.ExactSize(10))),
+        parseTest("""= text* [ size == 10 ]""", ListOfValues(TextValue(), ListConstraint.ExactSize(10))),
         parseTest(
-            """= text [ 10 <= length <= 100 ]{10}""",
+            """= text [ 10 <= length <= 100 ]* [ size == 10 ]""",
             ListOfValues(TextValue(TextConstraint.MinLength(10), TextConstraint.MaxLength(100)), ListConstraint.ExactSize(10))
+        ),
+        parseTest("""= text* [ unique ]""", ListOfValues(TextValue(), ListConstraint.Unique)),
+        parseTest("""= number+ [ unique ]""", ListOfValues(NumericValue(), ListConstraint.MinSize(1), ListConstraint.Unique)),
+        parseTest("""= text* [ unique, size == 3 ]""", ListOfValues(TextValue(), ListConstraint.Unique, ListConstraint.ExactSize(3))),
+        parseTest("""= text* [ unique, 2 <= size <= 5 ]""", ListOfValues(TextValue(), ListConstraint.Unique, ListConstraint.MinSize(2), ListConstraint.MaxSize(5))),
+        parseTest(
+            """= { id: text }* [ unique = id ]""",
+            ListOfValues(ObjectValue(Map(MandatoryLabel("id") -> TextValue())), ListConstraint.UniqueByFields(Seq("id")))
+        ),
+        parseTest(
+            """= { id: text, name: text }* [ unique = (id, name) ]""",
+            ListOfValues(
+                ObjectValue(Map(MandatoryLabel("id") -> TextValue(), MandatoryLabel("name") -> TextValue())),
+                ListConstraint.UniqueByFields(Seq("id", "name"))
+            )
+        ),
+        parseTest(
+            """= { id: text, code: text }* [ unique = id, unique = code ]""",
+            ListOfValues(
+                ObjectValue(Map(MandatoryLabel("id") -> TextValue(), MandatoryLabel("code") -> TextValue())),
+                ListConstraint.UniqueByFields(Seq("id")),
+                ListConstraint.UniqueByFields(Seq("code"))
+            )
+        ),
+        parseTest("""= text* [ size == 5 ]""", ListOfValues(TextValue(), ListConstraint.ExactSize(5))),
+        parseTest("""= text* [ size >= 2 ]""", ListOfValues(TextValue(), ListConstraint.MinSize(2))),
+        parseTest("""= text* [ size > 2 ]""", ListOfValues(TextValue(), ListConstraint.MinSize(3))),
+        parseTest("""= text* [ size <= 10 ]""", ListOfValues(TextValue(), ListConstraint.MaxSize(10))),
+        parseTest("""= text* [ size < 10 ]""", ListOfValues(TextValue(), ListConstraint.MaxSize(9))),
+        parseTest("""= text* [ 2 <= size <= 5 ]""", ListOfValues(TextValue(), ListConstraint.MinSize(2), ListConstraint.MaxSize(5))),
+        parseTest("""= text* [ 2 < size < 10 ]""", ListOfValues(TextValue(), ListConstraint.MinSize(3), ListConstraint.MaxSize(9))),
+        parseTest("""= text* [ 2 <= size ]""", ListOfValues(TextValue(), ListConstraint.MinSize(2))),
+        parseTest(
+            """= text* [ unique, 2 <= size <= 5 ]""",
+            ListOfValues(TextValue(), ListConstraint.Unique, ListConstraint.MinSize(2), ListConstraint.MaxSize(5))
         ),
 
         // ----------------------------------------------------------------

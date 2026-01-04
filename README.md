@@ -138,7 +138,7 @@ Tuple values are not useful for *regular* documents (`yaml`, `json`, `xml`, …)
 
 ## Text constraints
 
-### Size constraints
+### Size
 It is possible to constraint the size of the text.
 ```rengbis
 exactSize = text [ length == 10 ]
@@ -149,7 +149,6 @@ exactSize = text [ length == 10 ]
 = exactSize | short | long | inBetween
 ```
 
-
 ### Regular expressions
 ```rengbis
 = text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 ]
@@ -157,7 +156,7 @@ exactSize = text [ length == 10 ]
 Text values may be constraint with either a `regex` or a `length`.
 This would match an ISO8060 date value, like `2025-12-27`.
 
-### Patterns
+### Pattern
 It's also possible to use COBOL like 'picture clause' in order to express easier to read formats.
 
 ```rengbis
@@ -173,15 +172,45 @@ The current implementation handles these format specifiers:
 - any other character is parsed unchanged
 
 ## List constraints
+
+### Number of items
+
 ```rengbis
 = {
   possibly_empty_list_of_text: text*
   list_with_at_least_one_element: text+
-  list_with_exactly_three_element: text[3]
-  list_with_a_number_of_elements_between_two_and_ten: text[2,10]
+  list_with_exactly_three_element: text* [ size == 3 ]
+  list_with_a_number_of_elements_between_two_and_ten: text* [ 2 <= size <= 10 ]
 }
 ```
 List values may be constrainted in the number of items they contain.
+
+### Uniqueness
+It is also possible to define some uniqueness criteria for values in a given list.
+
+```rengbis
+structure = {
+    name: text
+    description: text
+}
+
+= {
+    list_of_unique_strings?: text* [ unique ]
+    list_of_unique_numbers?: number* [ unique ]
+    list_of_unique_integers?: number [ integer ]* [ unique ]
+
+    unique_names?: structure* [ unique = name ]
+    unique_name_plus_description?: structure* [ unique = (name, description) ]
+    unique_names_and_descriptions?: structure* [ unique = name, unique = description ]
+
+    list_of_exactly_three_integer?: number[ integer ]* [ size == 3 ]
+    list_of_at_least_two_integer_greater_that_10?: number[ integer, value >= 10 ]* [ size >= 2 ]
+}
+```
+
+At the moment there are a few limits on how this constraints may be defined:
+- uniqueness can only be defined on basic values (text, number, boolean) or combination of such basic values
+- only direct elements of the object where uniqueness constraints are defined may be referenced
 
 ## Number costraints
 Number definitions support two kind of constraints: *type* and *range*.

@@ -1,0 +1,7 @@
+unique_name_plus_description:
+    - name: "foo"
+      description: "foo_description"
+    - name: "foo"
+      description: "bar_description"
+    - name: "foo"
+      description: "bar_description"

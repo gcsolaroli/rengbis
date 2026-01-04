@@ -1,0 +1,19 @@
+structure = {
+    name: text
+    description: text
+}
+
+= {
+    list_of_unique_strings?: text* [ unique ]
+    list_of_unique_numbers?: number* [ unique ]
+    list_of_unique_integers?: number [ integer ]* [ unique ]
+
+    unique_names?: structure* [ unique = name ]
+    unique_name_plus_description?: structure* [ unique = (name, description) ]
+    unique_names_and_descriptions?: structure* [ unique = name, unique = description ]
+
+    list_of_three_integer?: number[ integer ]* [ size == 3 ]
+    list_of_at_least_two_integer_greater_that_10?: number[ integer, value >= 10 ]* [ size >= 2 ]
+
+    zero_or_at_least_one_items?: number+ [ size >= 0 ]
+}

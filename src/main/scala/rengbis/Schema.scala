@@ -26,9 +26,11 @@ object Schema:
 
     object ListConstraint:
         sealed abstract class Constraint
-        case class MinSize(value: Int)   extends Constraint
-        case class MaxSize(value: Int)   extends Constraint
-        case class ExactSize(value: Int) extends Constraint
+        case class MinSize(value: Int)                 extends Constraint
+        case class MaxSize(value: Int)                 extends Constraint
+        case class ExactSize(value: Int)               extends Constraint
+        case object Unique                             extends Constraint
+        case class UniqueByFields(fields: Seq[String]) extends Constraint
 
     object NumericConstraint:
         sealed abstract class Constraint
@@ -371,80 +373,112 @@ object Schema:
             <> scopedReference.widen[Schema]
             <> namedValueReference.widen[Schema]
 
-        val listOfValues: SchemaSyntax[Schema.ListOfValues] = (item <~ Syntax.char('*')).transform(
-            itemSchema => Schema.ListOfValues(itemSchema),
-            items => items.schema
+        val uniqueConstraint: SchemaSyntax[ListConstraint.Constraint]             = Syntax.string("unique", ListConstraint.Unique).widen[ListConstraint.Constraint]
+        val uniqueByFieldsConstraint: SchemaSyntax[ListConstraint.UniqueByFields] = (
+            Syntax.string("unique", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~
+                Syntax.char('(') ~ whitespaces ~
+                label.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) ~
+                whitespaces ~ Syntax.char(')')
+        ).transform(
+            fields => ListConstraint.UniqueByFields(fields.toSeq),
+            c => Chunk.fromIterable(c.fields)
         )
-            <> (item <~ Syntax.char('+')).transform(
-                itemSchema => Schema.ListOfValues(itemSchema, ListConstraint.MinSize(1)),
-                items => items.schema
+        val uniqueByFieldConstraint: SchemaSyntax[ListConstraint.UniqueByFields]  = (
+            Syntax.string("unique", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~ label
+        ).transform(
+            fieldName => ListConstraint.UniqueByFields(Seq(fieldName)),
+            c => c.fields.head
+        )
+
+        val listSizeConstraints: SchemaSyntax[Chunk[ListConstraint.Constraint]] = (
+            Syntax.string("size", ()) ~ whitespaces ~ sizeConstraint ~ whitespaces ~ number
+        ).transform(
+            (c, n) =>
+                Chunk(
+                    c match
+                        case ExtendedSizeConstraint.EQ => ListConstraint.ExactSize(n)
+                        case ExtendedSizeConstraint.GT => ListConstraint.MinSize(n + 1)
+                        case ExtendedSizeConstraint.GE => ListConstraint.MinSize(n)
+                        case SmallerSizeConstraint.LT  => ListConstraint.MaxSize(n - 1)
+                        case SmallerSizeConstraint.LE  => ListConstraint.MaxSize(n)
+                ),
+            c =>
+                c.head match
+                    case ListConstraint.ExactSize(s) => (ExtendedSizeConstraint.EQ, s)
+                    case ListConstraint.MinSize(s)   => (ExtendedSizeConstraint.GE, s)
+                    case ListConstraint.MaxSize(s)   => (SmallerSizeConstraint.LE, s)
+                    case _                           => (ExtendedSizeConstraint.EQ, 0)
+        )
+            <> (
+                number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("size", ()) ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ number
+            ).transform(
+                (l, lc, uc, u) =>
+                    (lc, uc) match
+                        case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LT) => Chunk(ListConstraint.MinSize(l + 1), ListConstraint.MaxSize(u - 1))
+                        case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LE) => Chunk(ListConstraint.MinSize(l + 1), ListConstraint.MaxSize(u))
+                        case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LT) => Chunk(ListConstraint.MinSize(l), ListConstraint.MaxSize(u - 1))
+                        case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LE) => Chunk(ListConstraint.MinSize(l), ListConstraint.MaxSize(u))
+                ,
+                c =>
+                    val minSize = c.collectFirst { case ListConstraint.MinSize(s) => s }.getOrElse(0)
+                    val maxSize = c.collectFirst { case ListConstraint.MaxSize(s) => s }.getOrElse(0)
+                    (minSize, SmallerSizeConstraint.LE, SmallerSizeConstraint.LE, maxSize)
             )
-            <> (item ~ Syntax.char('{') ~ number ~ Syntax.char('}')).transform(
-                (itemSchema, size) => Schema.ListOfValues(itemSchema, ListConstraint.ExactSize(size)),
-                items =>
-                    (
-                        items.schema,
-                        items.constraints
-                            .map(c =>
-                                c match {
-                                    case ListConstraint.ExactSize(size) => size
-                                    case _                              => 0
-                                }
-                            )
-                            .sum
-                    )
+            <> (
+                number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("size", ())
+            ).transform(
+                (l, lc) =>
+                    lc match
+                        case SmallerSizeConstraint.LT => Chunk(ListConstraint.MinSize(l + 1))
+                        case SmallerSizeConstraint.LE => Chunk(ListConstraint.MinSize(l))
+                ,
+                c =>
+                    val minSize = c.collectFirst { case ListConstraint.MinSize(s) => s }.getOrElse(0)
+                    (minSize, SmallerSizeConstraint.LE)
             )
-            <> (item ~ Syntax.char('{') ~ number ~ Syntax.char(',') ~ Syntax.char('}'))
-                .transform(
-                    (itemSchema, minSize) => Schema.ListOfValues(itemSchema, ListConstraint.MinSize(minSize)),
-                    items =>
-                        (
-                            items.schema,
-                            items.constraints
-                                .map(c =>
-                                    c match {
-                                        case ListConstraint.MinSize(size) => size
-                                        case _                            => 0
-                                    }
-                                )
-                                .max
-                        )
+
+        val listConstraint: SchemaSyntax[Chunk[ListConstraint.Constraint]] =
+            listSizeConstraints
+                <> uniqueByFieldsConstraint.transform(c => Chunk(c), cs => cs.head.asInstanceOf[ListConstraint.UniqueByFields])
+                <> uniqueByFieldConstraint.transform(c => Chunk(c), cs => cs.head.asInstanceOf[ListConstraint.UniqueByFields])
+                <> uniqueConstraint.transform(c => Chunk(c), cs => cs.head)
+
+        val listConstraintBlock: SchemaSyntax[Chunk[ListConstraint.Constraint]] = (
+            whitespaces ~ Syntax.char('[') ~ whitespaces ~>
+                listConstraint.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces)
+                <~ whitespaces ~ Syntax.char(']')
+        ).transform(
+            chunks => chunks.flatten,
+            chunk => Chunk(chunk)
+        )
+
+        val listOfValues: SchemaSyntax[Schema.ListOfValues] =
+            ((item <~ Syntax.char('*')) ~ listConstraintBlock).transform(
+                (itemSchema, constraints) => Schema.ListOfValues(itemSchema, constraints.toSeq*),
+                items => (items.schema, Chunk.fromIterable(items.constraints))
+            )
+                <> (item <~ Syntax.char('*')).transform(
+                    itemSchema => Schema.ListOfValues(itemSchema),
+                    items => items.schema
                 )
-            <> (item ~ Syntax.char('{') ~ number ~ Syntax.char(',') ~ number ~ Syntax.char('}'))
-                .filter((schema, minSize, maxSize) => minSize < maxSize, s"lower bound should be smaller that upper bound")
-                .transform(
-                    (itemSchema, minSize, maxSize) => Schema.ListOfValues(itemSchema, ListConstraint.MinSize(minSize), ListConstraint.MaxSize(maxSize)),
-                    items =>
-                        val minSize = items.constraints
-                            .map(c =>
-                                c match {
-                                    case ListConstraint.MinSize(size) => size
-                                    case _                            => 0
-                                }
-                            )
-                            .max
-                        val maxSize = items.constraints
-                            .map(c =>
-                                c match {
-                                    case ListConstraint.MaxSize(size) => size
-                                    case _                            => 0
-                                }
-                            )
-                            .min
-                        (items.schema, minSize, maxSize)
+                <> ((item <~ Syntax.char('+')) ~ listConstraintBlock).transform(
+                    (itemSchema, constraints) => Schema.ListOfValues(itemSchema, (ListConstraint.MinSize(1) +: constraints.toSeq)*),
+                    items => (items.schema, Chunk.fromIterable(items.constraints.filterNot(_ == ListConstraint.MinSize(1))))
+                )
+                <> (item <~ Syntax.char('+')).transform(
+                    itemSchema => Schema.ListOfValues(itemSchema, ListConstraint.MinSize(1)),
+                    items => items.schema
                 )
 
-        val tupleValues: SchemaSyntax[Schema.TupleValue] = (Syntax.char('(') ~>
-            (emptyLines ~ whitespaces ~ item).repeatWithSep(whitespaces ~ (Syntax.char(',') <> emptyLines))
-            <~ whitespaces ~ Syntax.char(')'))
+        val tupleValues: SchemaSyntax[Schema.TupleValue] = (Syntax.char('(') ~> (emptyLines ~ whitespaces ~ item).repeatWithSep(whitespaces ~ (Syntax.char(',') <> emptyLines)) <~ whitespaces ~ Syntax.char(')'))
             .filter(values => values.size > 1, s"tuple needs to have at least two items")
             .transform(
                 values => Schema.TupleValue(values*),
                 tuple => Chunk.fromIterable(tuple.options)
             )
 
-        val alternativeValuesOptions: SchemaSyntax[Schema]                                = listOfValues.widen[Schema]
-            <> item
+        val alternativeValuesOptions: SchemaSyntax[Schema] = listOfValues.widen[Schema] <> item
+
         val alternativeValues: SchemaSyntax[Schema.AlternativeValues | Schema.EnumValues] = (alternativeValuesOptions
             .repeatWithSep(whitespaces ~ Syntax.char('|') ~ whitespaces))
             .filter(options => options.size > 1, s"alternatives needs to have at least two items")
@@ -459,17 +493,15 @@ object Schema:
                         case AlternativeValues(options*) => Chunk.fromIterable(options)
             )
 
-        lazy val items: SchemaSyntax[Schema] = alternativeValues.widen[Schema]
-            <> listOfValues.widen[Schema]
-            <> tupleValues.widen[Schema]
-            <> item
+        lazy val items: SchemaSyntax[Schema] =
+            alternativeValues.widen[Schema]
+                <> listOfValues.widen[Schema]
+                <> tupleValues.widen[Schema]
+                <> item
 
         val rootKey = "root"
 
-        val root: SchemaSyntax[(String, Schema)] = valueDefinition.transform(
-            s => (rootKey, s),
-            (k, s) => s
-        )
+        val root: SchemaSyntax[(String, Schema)] = valueDefinition.transform(s => (rootKey, s), (k, s) => s)
 
         val definition: SchemaSyntax[(String, Schema)] = importStatement <> namedValue
 

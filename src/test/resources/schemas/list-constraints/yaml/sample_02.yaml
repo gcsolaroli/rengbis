@@ -1,0 +1,4 @@
+list_of_unique_integers:
+    - 10
+    - "20"
+    - 30

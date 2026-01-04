@@ -1,0 +1,2 @@
+# This fails as the "at least one item" constraint ('+') is still enforced, even if the 'size' constraint is set to >= 0.
+zero_or_at_least_one_items: []

@@ -39,14 +39,10 @@ object Validator:
         var i      = 0
         while i < format.length do
             format(i) match
-                // case '#' => sb.append("""[0-9]""")
-                case '#' => sb.append("""\p{N}""")
-                // case 'X' => sb.append("""[a-zA-Z]""")
-                case 'X' => sb.append("""\p{Letter}""")
-                // case '@' => sb.append("""[a-zA-Z0-9]""")
-                case '@' => sb.append("""[\p{Letter}\p{N}]""")
+                case '#' => sb.append("""\p{N}""")             //  [0-9]
+                case 'X' => sb.append("""\p{Letter}""")        //  [a-zA-Z]
+                case '@' => sb.append("""[\p{Letter}\p{N}]""") //  [a-zA-Z0-9]
                 case '*' => sb.append(""".""")
-                // case '-' | '/' | ' ' => sb.append("\\").append(format(i))
                 case c   => sb.append("""\""").append(c)
             i += 1
         val result = sb.toString.r
@@ -60,12 +56,75 @@ object Validator:
         case TextConstraint.Regex(pattern)  => if pattern.r.matches(text) then ValidationResult.valid else ValidationResult.reportError(s"regex ($pattern) not matching")
         case TextConstraint.Format(format)  => if formatToRegex(format).matches(text) then ValidationResult.valid else ValidationResult.reportError(s"format (${ format }) not matching")
 
-    def validateListConstraints[A](constraint: ListConstraint.Constraint, list: Chunk[A]) =
+    def validateListConstraints(constraint: ListConstraint.Constraint, list: Chunk[Value], itemSchema: Schema): ValidationResult =
         val size = list.size
         constraint match
-            case ListConstraint.MinSize(minSize)     => if (size >= minSize) then ValidationResult.valid else ValidationResult.reportError(s"list minimum size constraint (${ minSize }) not met: ${ size }")
-            case ListConstraint.MaxSize(maxSize)     => if (size <= maxSize) then ValidationResult.valid else ValidationResult.reportError(s"list maximum size constraint (${ maxSize }) not met: ${ size }")
-            case ListConstraint.ExactSize(exactSize) => if (size == exactSize) then ValidationResult.valid else ValidationResult.reportError(s"list exact size constraint (${ exactSize }) not met: ${ size }")
+            case ListConstraint.MinSize(minSize)       => if (size >= minSize) then ValidationResult.valid else ValidationResult.reportError(s"list minimum size constraint (${ minSize }) not met: ${ size }")
+            case ListConstraint.MaxSize(maxSize)       => if (size <= maxSize) then ValidationResult.valid else ValidationResult.reportError(s"list maximum size constraint (${ maxSize }) not met: ${ size }")
+            case ListConstraint.ExactSize(exactSize)   => if (size == exactSize) then ValidationResult.valid else ValidationResult.reportError(s"list exact size constraint (${ exactSize }) not met: ${ size }")
+            case ListConstraint.Unique                 => validateUniqueness(list, itemSchema)
+            case ListConstraint.UniqueByFields(fields) => validateUniquenessBy(list, fields, itemSchema)
+
+    private def normalizeValueForUniquenessComparison(value: Value, schema: Schema): Option[Any] = schema match
+        case NumericValue(_*) =>
+            value match
+                case Value.NumberValue(v) => Some(v)
+                case Value.TextValue(v)   => Try(BigDecimal(v)).toOption
+                case _                    => None
+        case TextValue(_*)    =>
+            value match
+                case Value.TextValue(v) => Some(v)
+                case _                  => None
+        case BooleanValue()   =>
+            value match
+                case Value.BooleanValue(v) => Some(v)
+                case _                     => None
+        case _                => extractSimpleKey(value)
+
+    private def extractSimpleKey(value: Value): Option[Any] = value match
+        case Value.TextValue(v)    => Some(v)
+        case Value.NumberValue(v)  => Some(v)
+        case Value.BooleanValue(v) => Some(v)
+        case _                     => None
+
+    private def extractFieldKey(value: Value, fields: Seq[String], itemSchema: Schema): Option[Seq[Any]] =
+        val fieldSchemas: Map[String, Schema] = itemSchema match
+            case ObjectValue(obj) => obj.map((label, schema) => (label.label, schema))
+            case _                => Map.empty
+
+        value match
+            case Value.ObjectWithValues(values) =>
+                val keys = fields.flatMap { f =>
+                    for
+                        fieldValue  <- values.get(f)
+                        fieldSchema <- fieldSchemas
+                                           .get(f)
+                                           .orElse(Some(fieldValue match
+                                               case Value.TextValue(_)    => TextValue()
+                                               case Value.NumberValue(_)  => NumericValue()
+                                               case Value.BooleanValue(_) => BooleanValue()
+                                               case _                     => Fail()))
+                        key         <- normalizeValueForUniquenessComparison(fieldValue, fieldSchema)
+                    yield key
+                }
+                if keys.size == fields.size then Some(keys) else None
+            case _                              => None
+
+    private def validateUniqueness(list: Chunk[Value], itemSchema: Schema): ValidationResult =
+        val keys = list.flatMap(v => normalizeValueForUniquenessComparison(v, itemSchema))
+        if keys.size != list.size then ValidationResult.reportError("uniqueness constraint only applies to simple values (text, number, boolean)")
+        else
+            val duplicates = keys.groupBy(identity).filter(_._2.size > 1).keys.toSeq
+            if duplicates.nonEmpty then ValidationResult.reportError(s"duplicate values found: ${ duplicates.mkString(", ") }")
+            else ValidationResult.valid
+
+    private def validateUniquenessBy(list: Chunk[Value], fields: Seq[String], itemSchema: Schema): ValidationResult =
+        val keys = list.flatMap(v => extractFieldKey(v, fields, itemSchema))
+        if keys.size != list.size then ValidationResult.reportError(s"uniqueness constraint: all items must be objects with fields: ${ fields.mkString(", ") }")
+        else
+            val duplicates = keys.groupBy(identity).filter(_._2.size > 1).keys.toSeq
+            if duplicates.nonEmpty then ValidationResult.reportError(s"duplicate values found for fields (${ fields.mkString(", ") }): ${ duplicates.map(_.mkString("(", ", ", ")")).mkString(", ") }")
+            else ValidationResult.valid
 
     def validateNumericConstraints(constraint: NumericConstraint.Constraint, value: BigDecimal) = constraint match
         case NumericConstraint.Integer                => if value.isWhole then ValidationResult.valid else ValidationResult.reportError(s"integer constraint not met: ${ value } is not an integer")
@@ -105,7 +164,7 @@ object Validator:
             value match
                 case Value.ArrayOfValues(values) =>
                     ValidationResult.summarize(
-                        constraints.map(c => validateListConstraints(c, values)) ++
+                        constraints.map(c => validateListConstraints(c, values, s)) ++
                             values.map(v => validateValue(s, v))
                     )
                 case value                       => ValidationResult.reportError(s"expected list of values; ${ value.valueTypeDescription } found [value: ${ value }]")
