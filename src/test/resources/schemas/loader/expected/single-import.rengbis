@@ -3,7 +3,7 @@
 = {
     user: {
         name: text,
-        email: text { regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }
+        email: text [ regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" ]
     },
-    contactEmail: text { regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }
+    contactEmail: text [ regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" ]
 }

@@ -79,7 +79,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("text constraints (minLength, maxLength)"):
-            val schemaDefinition = """= text { 10 <= length <= 100 }"""
+            val schemaDefinition = """= text [ 10 <= length <= 100 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -90,7 +90,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("text constraints (regex)"):
-            val schemaDefinition = """= text { regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})" }"""
+            val schemaDefinition = """= text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})" ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -101,7 +101,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("text constraints (regex) with also length constraint"):
-            val schemaDefinition = """= text { regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 }"""
+            val schemaDefinition = """= text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -112,8 +112,8 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("text constraints (email regex)"):
-            // val schemaDefinition ="""= text { regex = "/^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/" }"""
-            val schemaDefinition = """= text { regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }"""
+            // val schemaDefinition ="""= text [ regex = "/^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/" ]"""
+            val schemaDefinition = """= text [ regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -124,7 +124,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("text patterns"):
-            val schemaDefinition = """= text { pattern = "{###-###-####}"}"""
+            val schemaDefinition = """= text [ pattern = "{###-###-####}" ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -197,7 +197,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("number constraints (integer)"):
-            val schemaDefinition = """= number { integer }"""
+            val schemaDefinition = """= number [ integer ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -210,7 +210,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("number constraints (min value)"):
-            val schemaDefinition = """= number { value >= 0 }"""
+            val schemaDefinition = """= number [ value >= 0 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -223,7 +223,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("number constraints (min value) - exclusive"):
-            val schemaDefinition = """= number { value > 0 }"""
+            val schemaDefinition = """= number [ value > 0 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -236,7 +236,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("number constraints (max value)"):
-            val schemaDefinition = """= number { value <= 100 }"""
+            val schemaDefinition = """= number [ value <= 100 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -249,7 +249,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("number constraints (range)"):
-            val schemaDefinition = """= number { 0 <= value <= 100 }"""
+            val schemaDefinition = """= number [ 0 <= value <= 100 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -262,7 +262,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("number constraints (exact value)"):
-            val schemaDefinition = """= number { value == 42 }"""
+            val schemaDefinition = """= number [ value == 42 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -273,7 +273,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("number constraints (combined integer and range)"):
-            val schemaDefinition = """= number { integer, 1 <= value <= 12 }"""
+            val schemaDefinition = """= number [ integer, 1 <= value <= 12 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -287,7 +287,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("number constraints (negative values)"):
-            val schemaDefinition = """= number { value >= -10 }"""
+            val schemaDefinition = """= number [ value >= -10 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(
@@ -299,7 +299,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                 case Left(value)   => assertTrue(value == ""))
         ,
         test("number constraints (decimal bounds)"):
-            val schemaDefinition = """= number { value >= 0.5 }"""
+            val schemaDefinition = """= number [ value >= 0.5 ]"""
             allSuccesses(parse(schemaDefinition) match
                 case Right(schema) =>
                     allSuccesses(

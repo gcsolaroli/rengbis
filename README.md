@@ -98,7 +98,7 @@ It's also possible to define structures with *free* keys; in order to express th
 service = { name: text, port?: number }
 = {
     name: text,
-    services: { …: service }
+    services: [ …: service ]
 }
 ```
 
@@ -141,18 +141,18 @@ Tuple values are not useful for *regular* documents (`yaml`, `json`, `xml`, …)
 ### Size constraints
 It is possible to constraint the size of the text.
 ```rengbis
-exactSize = text { length == 10 }
-short = text { length <= 4 }
-long  = text { length > 20 }
-inBetween  = text { 8 < length <= 12 }
-exactSize = text { length == 10 }
+exactSize = text [ length == 10 ]
+short = text [ length <= 4 ]
+long  = text [ length > 20 ]
+inBetween  = text [ 8 < length <= 12 ]
+exactSize = text [ length == 10 ]
 = exactSize | short | long | inBetween
 ```
 
 
 ### Regular expressions
 ```rengbis
-= text { regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 }
+= text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 ]
 ```
 Text values may be constraint with either a `regex` or a `length`.
 This would match an ISO8060 date value, like `2025-12-27`.
@@ -161,7 +161,7 @@ This would match an ISO8060 date value, like `2025-12-27`.
 It's also possible to use COBOL like 'picture clause' in order to express easier to read formats.
 
 ```rengbis
-= text { pattern = "(###) ###-####" }
+= text [ pattern = "(###) ###-####" ]
 ```
 This would match an US formatted phone number, like `(123) 456-7890`.
 
@@ -177,8 +177,8 @@ The current implementation handles these format specifiers:
 = {
   possibly_empty_list_of_text: text*
   list_with_at_least_one_element: text+
-  list_with_exactly_three_element: text{3}
-  list_with_a_number_of_elements_between_two_and_ten: text{2,10}
+  list_with_exactly_three_element: text[3]
+  list_with_a_number_of_elements_between_two_and_ten: text[2,10]
 }
 ```
 List values may be constrainted in the number of items they contain.
@@ -187,19 +187,19 @@ List values may be constrainted in the number of items they contain.
 Number definitions support two kind of constraints: *type* and *range*.
 For the *type*, there is currently just one option that can be specified, and that is 'integer'.
 ```rengbis
-= number { integer }
+= number [ integer ]
 ```
 
 This defines that the value must be integer, with no decimals digits.
 
 To specify the *range* of legit values, the syntax mimics the one used to specify the `length` of `text` values:
 ```rengbis
-positiveValue = number { value > 0 }
-positiveInteger = number { integer, value > 0 }
+positiveValue = number [ value > 0 ]
+positiveInteger = number [ integer, value > 0 ]
 
-reservedPortNumber = number { integer, 0 <= value < 1024 }
-registeredPortNumber = number { integer, 1024 <= value < 49152 }
-ephemeralPortNumber = number { integer, 49152 <= value <= 65535 }
+reservedPortNumber = number [ integer, 0 <= value < 1024 ]
+registeredPortNumber = number [ integer, 1024 <= value < 49152 ]
+ephemeralPortNumber = number [ integer, 49152 <= value <= 65535 ]
 ```
 
 

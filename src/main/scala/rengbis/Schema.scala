@@ -212,7 +212,7 @@ object Schema:
                 <> formatTextConstraint.+
 
         val textValue: SchemaSyntax[Schema.TextValue] = (
-            Syntax.string("text", ()) ~ (whitespaces ~ Syntax.char('{') ~ whitespaces ~> textConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char('}')).optional
+            Syntax.string("text", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> textConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
         ).transform(
             constraints => TextValue(constraints.map(_.flatMap(identity)).getOrElse(Chunk()).toList*),
             textValue => if textValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(textValue.constraints)))
@@ -291,7 +291,7 @@ object Schema:
                 <> integerConstraint.+
 
         val numericValue: SchemaSyntax[Schema.NumericValue] = (
-            Syntax.string("number", ()) ~ (whitespaces ~ Syntax.char('{') ~ whitespaces ~> numericConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char('}')).optional
+            Syntax.string("number", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> numericConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
         ).transform(
             constraints => NumericValue(constraints.map(_.flatMap(identity)).getOrElse(Chunk()).toList*),
             numericValue => if numericValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(numericValue.constraints)))

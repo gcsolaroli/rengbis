@@ -3,10 +3,10 @@
 = {
     person: {
         name: text,
-        email: text { regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }
+        email: text [ regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" ]
     },
     credentials: {
-        user: text { 3 <= length <= 20 },
-        pass: text { 8 <= length }
+        user: text [ 3 <= length <= 20 ],
+        pass: text [ 8 <= length ]
     }
 }

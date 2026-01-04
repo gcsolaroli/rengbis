@@ -1,7 +1,7 @@
 # Common library of reusable schema definitions
 
-email = text { regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" }
-phone = text { pattern = "{###-###-####}" }
+email = text [ regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" ]
+phone = text [ pattern = "{###-###-####}" ]
 
 person = {
     name: text,

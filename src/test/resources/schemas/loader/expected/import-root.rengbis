@@ -2,8 +2,8 @@
 
 = {
     credentials: {
-        user: text { 3 <= length <= 20 },
-        pass: text { 8 <= length }
+        user: text [ 3 <= length <= 20 ],
+        pass: text [ 8 <= length ]
     },
-    username: text { 3 <= length <= 20 }
+    username: text [ 3 <= length <= 20 ]
 }
