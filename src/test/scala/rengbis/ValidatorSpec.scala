@@ -13,6 +13,49 @@ object ValidatorSpec extends ZIOSpecDefault:
     val validateString     = Validator.validateString(DataParsers.text)
 
     def spec = suite("Validator features")(
+        test("any type accepts all values"):
+            val schemaDefinition = """= any"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """true""").isValid),
+                        assertTrue(validateJsonString(schema, """false""").isValid),
+                        assertTrue(validateJsonString(schema, """"hello"""").isValid),
+                        assertTrue(validateJsonString(schema, """42""").isValid),
+                        assertTrue(validateJsonString(schema, """3.14""").isValid),
+                        assertTrue(validateJsonString(schema, """null""").isValid),
+                        assertTrue(validateJsonString(schema, """[]""").isValid),
+                        assertTrue(validateJsonString(schema, """["foo", 123]""").isValid),
+                        assertTrue(validateJsonString(schema, """{}""").isValid),
+                        assertTrue(validateJsonString(schema, """{"key": "value", "num": 42}""").isValid)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("any type in object field"):
+            val schemaDefinition = """= { name: text, data: any }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """{"name": "test", "data": true}""").isValid),
+                        assertTrue(validateJsonString(schema, """{"name": "test", "data": 42}""").isValid),
+                        assertTrue(validateJsonString(schema, """{"name": "test", "data": "hello"}""").isValid),
+                        assertTrue(validateJsonString(schema, """{"name": "test", "data": [1, 2, 3]}""").isValid),
+                        assertTrue(validateJsonString(schema, """{"name": "test", "data": {"nested": "object"}}""").isValid),
+                        assertTrue(validateJsonString(schema, """{"name": "test", "data": null}""").isValid),
+                        assertTrue(validateJsonString(schema, """{"name": 41, "data": null}""").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("any type in list"):
+            val schemaDefinition = """= any*"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """[]""").isValid),
+                        assertTrue(validateJsonString(schema, """[1, "two", true, null, {"key": "value"}]""").isValid)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
         test("trivial Yaml values"):
             allSuccesses(parse("""= "yes" | "no" """) match
                 case Right(schema) =>

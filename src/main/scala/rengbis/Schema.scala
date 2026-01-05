@@ -50,6 +50,7 @@ object Schema:
         def dependencies: Seq[String]                                                   = Seq.empty
 
     final case class Fail()                                                   extends Schema
+    final case class AnyValue()                                               extends Schema
     final case class BooleanValue()                                           extends Schema
     final case class TextValue(constraints: TextConstraint.Constraint*)       extends Schema
     final case class GivenTextValue(value: String)                            extends Schema
@@ -220,6 +221,7 @@ object Schema:
             textValue => if textValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(textValue.constraints)))
         )
 
+        val anyValue: SchemaSyntax[Schema.AnyValue]             = Syntax.string("any", Schema.AnyValue())
         val booleanValue: SchemaSyntax[Schema.BooleanValue]     = Syntax.string("boolean", Schema.BooleanValue())
         val givenTextValue: SchemaSyntax[Schema.GivenTextValue] = quotedString.transform(s => Schema.GivenTextValue(s), v => v.value)
 
@@ -363,7 +365,8 @@ object Schema:
             mapVal => mapVal.valueSchema
         )
 
-        val item: SchemaSyntax[Schema] = booleanValue.widen[Schema]
+        val item: SchemaSyntax[Schema] = anyValue.widen[Schema]
+            <> booleanValue.widen[Schema]
             <> numericValue.widen[Schema]
             <> textValue.widen[Schema]
             <> givenTextValue.widen[Schema]

@@ -76,9 +76,9 @@ Here is a brief run down of the currently supported features
 
 ## Basic value types and Alternative options
 ```rengbis
-= text | number | boolean
+= text | number | boolean | any
 ```
-This schema defines a value that may be a `text`, a `number`, or a `boolean` value.
+This schema defines a value that may be a `text`, a `number`, a `boolean`, or just `any` value.
 Besides the basic value types, it also shows the way to define alternative options (`|`) for a given value.
 
 ## Basic structure (aka "dictionary")

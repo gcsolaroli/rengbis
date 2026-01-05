@@ -12,6 +12,7 @@ object SchemaSpec extends ZIOSpecDefault:
     def parseTest(text: String, expectedValue: Schema) = test(text) { assertTrue(parse(text) == Right(expectedValue)) }
 
     def spec = suite("Schema parsing features")(
+        parseTest("= any", AnyValue()),
         parseTest("= number", NumericValue()),
         parseTest("= text", TextValue()),
         parseTest("= number*", ListOfValues(NumericValue())),

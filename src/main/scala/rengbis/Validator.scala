@@ -134,6 +134,7 @@ object Validator:
 
     def validateValue(schema: Schema, value: Value): ValidationResult = schema match
         case Fail()                        => ValidationResult.reportError(s"fail value")
+        case AnyValue()                    => ValidationResult.valid
         case BooleanValue()                =>
             value match
                 case Value.BooleanValue(value) => ValidationResult.valid
