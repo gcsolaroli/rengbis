@@ -35,8 +35,8 @@ object Validator:
     // ========================================================================
 
     def formatToRegex(format: String): scala.util.matching.Regex =
-        val sb     = new StringBuilder
-        var i      = 0
+        val sb = new StringBuilder
+        var i  = 0
         while i < format.length do
             format(i) match
                 case '#' => sb.append("""\p{N}""")             //  [0-9]
@@ -45,9 +45,7 @@ object Validator:
                 case '*' => sb.append(""".""")
                 case c   => sb.append("""\""").append(c)
             i += 1
-        val result = sb.toString.r
-        println(s"formatToRegex: ${ format } => '${ result }'")
-        result
+        return sb.toString.r
 
     def validateTextConstraints(constraint: TextConstraint.Constraint, text: String) = constraint match
         case TextConstraint.MinLength(size) => if (text.length >= size) then ValidationResult.valid else ValidationResult.reportError(s"minLength constraint (${ size }) not met: ${ text.length() }")

@@ -1,6 +1,5 @@
 package rengbis
 
-import zio.{ Task, ZIO }
 import zio.test.{ assertTrue, ZIOSpecDefault }
 import zio.test.TestResult.allSuccesses
 
@@ -281,7 +280,7 @@ object SchemaFailSpec extends ZIOSpecDefault:
 // ############################################################################
 
 object SchemaSamplesSpec extends ZIOSpecDefault:
-    type FileValidationResult = (String, Either[String, String])
+    import zio.test.Spec
 
     def isExpectedToFail(path: Path): Boolean =
         val fileName       = path.getFileName.toString
@@ -290,52 +289,29 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
             case i  => fileName.substring(0, i)
         nameWithoutExt.endsWith("-NOT_VALID")
 
-    def validateSchemaFiles(schemasDir: Path): Task[List[FileValidationResult]] =
-        ZIO.attempt:
-            Files
-                .list(schemasDir)
-                .iterator()
-                .asScala
-                .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".rengbis"))
-                .map { schemaFile =>
-                    val fileName       = schemaFile.getFileName.toString
-                    val content        = Files.readString(schemaFile)
-                    val parseResult    = Schema.parse(content)
-                    val expectedToFail = isExpectedToFail(schemaFile)
+    def getSchemaFiles(schemasDir: Path): List[Path] =
+        Files
+            .list(schemasDir)
+            .iterator()
+            .asScala
+            .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".rengbis"))
+            .toList
+            .sortBy(_.getFileName.toString)
 
-                    (parseResult, expectedToFail) match
-                        case (Right(_), false)  => (fileName, Right("valid as expected"))
-                        case (Left(_), true)    => (fileName, Right("invalid as expected"))
-                        case (Right(_), true)   => (fileName, Left("expected to be invalid but parsed successfully"))
-                        case (Left(err), false) => (fileName, Left(s"expected to be valid but failed: $err"))
-                }
-                .toList
+    def schemaFileTest(schemaFile: Path): Spec[Any, Nothing] =
+        val fileName       = schemaFile.getFileName.toString
+        val content        = Files.readString(schemaFile)
+        val parseResult    = Schema.parse(content)
+        val expectedToFail = isExpectedToFail(schemaFile)
 
-    def validateDataFiles(schemasDir: Path): Task[List[FileValidationResult]] =
-        ZIO.attempt:
-            val schemaDirs = Files
-                .list(schemasDir)
-                .iterator()
-                .asScala
-                .filter(p => Files.isDirectory(p))
-                .filter(p => Files.exists(p.resolveSibling(p.getFileName.toString + ".rengbis")))
-                .toList
+        test(fileName):
+            (parseResult, expectedToFail) match
+                case (Right(_), false)  => assertTrue(true) ?? "valid as expected"
+                case (Left(_), true)    => assertTrue(true) ?? "invalid as expected"
+                case (Right(_), true)   => assertTrue(false) ?? "expected to be invalid but parsed successfully"
+                case (Left(err), false) => assertTrue(false) ?? s"expected to be valid but failed: $err"
 
-            schemaDirs.flatMap { schemaDir =>
-                val schemaName = schemaDir.getFileName.toString
-                val schemaFile = schemasDir.resolve(s"$schemaName.rengbis")
-
-                if !Files.exists(schemaFile) then List((s"$schemaName/", Left(s"no matching schema file found: $schemaName.rengbis")))
-                else
-                    val schemaContent = Files.readString(schemaFile)
-                    Schema.parse(schemaContent) match
-                        case Left(err)     =>
-                            List((schemaFile.getFileName.toString, Left(s"schema parse error: $err")))
-                        case Right(schema) =>
-                            validateDataFilesForSchema(schemaDir, schema)
-            }
-
-    def validateDataFilesForSchema(schemaDir: Path, schema: Schema): List[FileValidationResult] =
+    def getDataFilesForSchema(schemaDir: Path, schema: Schema): List[(Path, String => Either[String, Value])] =
         val formatDirs = Files
             .list(schemaDir)
             .iterator()
@@ -352,40 +328,63 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                 case _      => None
 
             parser match
-                case None             =>
-                    List((s"${ schemaDir.getFileName }/$formatName/", Left(s"unknown format: $formatName (expected json, yaml, or xml)")))
-                case Some(dataParser) =>
-                    val dataFiles = Files
+                case None         => Nil
+                case Some(parser) =>
+                    Files
                         .list(formatDir)
                         .iterator()
                         .asScala
                         .filter(p => Files.isRegularFile(p))
+                        .map(p => (p, parser))
                         .toList
-
-                    dataFiles.map { dataFile =>
-                        val content        = Files.readString(dataFile)
-                        val result         = Validator.validateString(dataParser)(schema, content)
-                        val expectedToFail = isExpectedToFail(dataFile)
-                        val relativePath   = s"${ schemaDir.getFileName }/$formatName/${ dataFile.getFileName }"
-
-                        (result.isValid, expectedToFail) match
-                            case (true, false)  => (relativePath, Right("valid as expected"))
-                            case (false, true)  => (relativePath, Right("invalid as expected"))
-                            case (true, true)   => (relativePath, Left("expected to be invalid but validated successfully"))
-                            case (false, false) => (relativePath, Left(s"expected to be valid but failed: ${ result.errorMessage }"))
-                    }
         }
 
-    def spec = suite("Schema parsing samples")(
-        test("validate all schema and data files in resources/schemas"):
-            val schemasDir = Paths.get(getClass.getClassLoader.getResource("schemas").toURI)
+    def dataFileTest(schemaDir: Path, schema: Schema, dataFile: Path, parser: String => Either[String, Value]): Spec[Any, Nothing] =
+        val content        = Files.readString(dataFile)
+        val result         = Validator.validateString(parser)(schema, content)
+        val expectedToFail = isExpectedToFail(dataFile)
+        val formatName     = dataFile.getParent.getFileName.toString
+        val relativePath   = s"$formatName/${ dataFile.getFileName }"
 
-            for
-                schemaResults <- validateSchemaFiles(schemasDir)
-                dataResults   <- validateDataFiles(schemasDir)
-                allResults     = schemaResults ++ dataResults
-                failures       = allResults.collect { case (file, Left(error)) => s"  - $file: $error" }
-            yield
-                if failures.isEmpty then assertTrue(true)
-                else assertTrue(false) ?? s"Validation failures:\n${ failures.mkString("\n") }"
-    )
+        test(relativePath):
+            (result.isValid, expectedToFail) match
+                case (true, false)  => assertTrue(true) ?? "valid as expected"
+                case (false, true)  => assertTrue(true) ?? "invalid as expected"
+                case (true, true)   => assertTrue(false) ?? "expected to be invalid but validated successfully"
+                case (false, false) => assertTrue(false) ?? s"expected to be valid but failed: ${ result.errorMessage }"
+
+    def dataSuiteForSchema(schemasDir: Path, schemaDir: Path): Spec[Any, Nothing] =
+        val schemaName    = schemaDir.getFileName.toString
+        val schemaFile    = schemasDir.resolve(s"$schemaName.rengbis")
+        val schemaContent = Files.readString(schemaFile)
+
+        Schema.parse(schemaContent) match
+            case Left(err)     =>
+                suite(schemaName)(
+                    test("schema parsing")(assertTrue(false) ?? s"schema parse error: $err")
+                )
+            case Right(schema) =>
+                val dataFiles = getDataFilesForSchema(schemaDir, schema).sortBy(_._1.getFileName.toString)
+                val tests     = dataFiles.map { case (dataFile, parser) => dataFileTest(schemaDir, schema, dataFile, parser) }
+                suite(schemaName)(tests*)
+
+    def getSchemaDirs(schemasDir: Path): List[Path] =
+        Files
+            .list(schemasDir)
+            .iterator()
+            .asScala
+            .filter(p => Files.isDirectory(p))
+            .filter(p => Files.exists(p.resolveSibling(p.getFileName.toString + ".rengbis")))
+            .toList
+            .sortBy(_.getFileName.toString)
+
+    def spec =
+        val schemasDir = Paths.get(getClass.getClassLoader.getResource("schemas").toURI)
+
+        val schemaFileTests = getSchemaFiles(schemasDir).map(schemaFileTest)
+        val dataSuites      = getSchemaDirs(schemasDir).map(dir => dataSuiteForSchema(schemasDir, dir))
+
+        suite("Schema samples")(
+            suite("Schema file parsing")(schemaFileTests*),
+            suite("Data file validation")(dataSuites*)
+        )
