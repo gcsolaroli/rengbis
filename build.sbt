@@ -70,6 +70,7 @@ lazy val lsp = project
         version := "0.0.1-SNAPSHOT"
     )
     .settings(lspDependencies)
+    .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
     .settings(
         assembly / mainClass             := Some("rengbis.lsp.Main"),
         assembly / assemblyJarName       := "rengbis-lsp.jar",
@@ -102,5 +103,9 @@ lazy val coreDependencies = Seq(
 lazy val lspDependencies = Seq(
     libraryDependencies ++= Seq(
         "org.eclipse.lsp4j" % "org.eclipse.lsp4j" % lsp4j_version
-    )
+    ),
+    libraryDependencies ++= Seq(
+        "dev.zio" %% "zio-test"     % zio,
+        "dev.zio" %% "zio-test-sbt" % zio
+    ).map(_ % Test)
 )
