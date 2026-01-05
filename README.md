@@ -280,6 +280,10 @@ Using the `sbt core/nativeImage` it is possible to build a native executable, `m
 
 ReNGBis includes a **Language Server Protocol (LSP)** implementation that provides rich IDE features in any LSP-compatible editor!
 
+> [!WARNING]
+> This is just the skeleton to start working on a proof-of-concept.
+> It's not meant or expected to be working nor useful at this point in time
+
 ### Features
 
 - **Syntax Validation**: Real-time error checking as you type
