@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Launcher script for ReNGBis LSP Server
+
+# Get the directory where this script is located
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
+# Path to the LSP server JAR
+LSP_JAR="$SCRIPT_DIR/modules/lsp/target/scala-3.7.4/rengbis-lsp.jar"
+
+# Check if JAR exists
+if [ ! -f "$LSP_JAR" ]; then
+    echo "Error: LSP server JAR not found at $LSP_JAR" >&2
+    echo "Please build it first with: sbt lsp/assembly" >&2
+    exit 1
+fi
+
+# Launch the LSP server
+exec java -jar "$LSP_JAR" "$@"

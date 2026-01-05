@@ -266,12 +266,39 @@ Before venturing in this experiment, I did many tries with [`zio-schema`](https:
 ## Build options
 
 ### Fat JAR
-Using the `sbt assembly` command you get a fat JAR in `target/scala-3.7.4/rengbis.jar`.
+Using the `sbt core/assembly` command you get a fat JAR in `modules/core/target/scala-3.7.4/rengbis.jar`.
 
 This file can then be used like a regular `java` application:
 ```shell
-java -jar target/scala-3.7.4/rengbis.jar validate-schema schema.rengbis
+java -jar modules/core/target/scala-3.7.4/rengbis.jar validate-schema schema.rengbis
 ```
 
 ### Native binary
-Using the `sbt nativeImage` it is possible to build a native executables, `target/native-image/rengbis`.
+Using the `sbt core/nativeImage` it is possible to build a native executable, `modules/core/target/native-image/rengbis`.
+
+## Editor Support
+
+ReNGBis includes a **Language Server Protocol (LSP)** implementation that provides rich IDE features in any LSP-compatible editor!
+
+### Features
+
+- **Syntax Validation**: Real-time error checking as you type
+- **Code Completion**: Auto-complete for keywords, types, and schema syntax
+- **Hover Documentation**: Helpful information about schema elements and keywords
+- **Go to Definition**: Navigate to named value definitions and imports
+
+### Quick Start
+
+1. Build the LSP server:
+```bash
+sbt lsp/assembly
+```
+
+2. Use the launcher script:
+```bash
+./modules/lsp/rengbis-lsp
+```
+
+3. Configure your editor to use the LSP server (see [modules/lsp/README.md](modules/lsp/README.md) for detailed setup instructions for VS Code, Neovim, Emacs, Sublime Text, and IntelliJ IDEA)
+
+For complete setup instructions and editor-specific configurations, see the [LSP documentation](modules/lsp/README.md).
