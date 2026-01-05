@@ -70,7 +70,10 @@ lazy val lsp = project
         version := "0.0.1-SNAPSHOT"
     )
     .settings(lspDependencies)
-    .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
+    .settings(
+        testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+        Test / scalacOptions += "-Wconf:cat=deprecation&msg=class MarkedString:s"
+    )
     .settings(
         assembly / mainClass             := Some("rengbis.lsp.Main"),
         assembly / assemblyJarName       := "rengbis-lsp.jar",

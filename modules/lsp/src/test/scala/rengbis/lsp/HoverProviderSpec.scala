@@ -1,7 +1,7 @@
 package rengbis.lsp
 
 import zio.test.{ assertTrue, suite, test, TestAspect, ZIOSpecDefault }
-import org.eclipse.lsp4j.{ MarkedString, MarkupKind }
+import org.eclipse.lsp4j.MarkupKind
 
 object HoverProviderSpec extends ZIOSpecDefault:
 
@@ -13,7 +13,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 3) // cursor on "text"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("text"),
@@ -26,7 +25,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 4) // cursor on "number"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("number"),
@@ -39,7 +37,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 5) // cursor on "boolean"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("boolean"),
@@ -52,7 +49,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 3) // cursor on "any"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("any")
@@ -66,7 +62,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 10) // cursor on "regex"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("regex"),
@@ -79,7 +74,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 12) // cursor on "pattern"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("pattern"),
@@ -92,7 +86,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 11) // cursor on "length"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("length")
@@ -104,7 +97,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 13) // cursor on "value"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("value"),
@@ -117,7 +109,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 13) // cursor on "integer"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("integer")
@@ -129,7 +120,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 12) // cursor on "unique"
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("unique")
@@ -143,7 +133,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 3)
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getKind() == MarkupKind.MARKDOWN
@@ -155,7 +144,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 3)
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("Example")
@@ -169,7 +157,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 0) // cursor on "="
 
                 val hover = ctx.hover()
-
                 assertTrue(hover.isEmpty)
             },
             test("should handle multi-line documents") {
@@ -182,7 +169,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(1, 3) // cursor on "number" on second line
 
                 val hover = ctx.hover()
-
                 assertTrue(
                     hover.isDefined,
                     hover.get.getContents().getRight().getValue().contains("number")
@@ -194,7 +180,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 5) // cursor in middle of "boolean"
 
                 val hover = ctx.hover()
-
                 assertTrue(hover.isDefined)
             }
         ),
@@ -205,7 +190,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 2) // cursor on "person"
 
                 val hover = ctx.hover()
-
                 assertTrue(hover.isEmpty)
             },
             test("should return None for whitespace") {
@@ -214,7 +198,6 @@ object HoverProviderSpec extends ZIOSpecDefault:
                     .atPosition(0, 2) // cursor on whitespace
 
                 val hover = ctx.hover()
-
                 assertTrue(hover.isEmpty)
             }
         )

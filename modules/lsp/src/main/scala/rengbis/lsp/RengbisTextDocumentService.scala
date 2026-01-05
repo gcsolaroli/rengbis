@@ -13,6 +13,7 @@ import scala.jdk.CollectionConverters.SeqHasAsJava
 class RengbisTextDocumentService extends TextDocumentService:
     private var client: LanguageClient | Null = null
     private val documentManager               = DocumentManager()
+    private val schemaCache                   = SchemaCache()
     private val completionProvider            = CompletionProvider()
     private val hoverProvider                 = HoverProvider()
     private val definitionProvider            = DefinitionProvider()
@@ -37,8 +38,6 @@ class RengbisTextDocumentService extends TextDocumentService:
     override def didClose(params: DidCloseTextDocumentParams): Unit =
         val uri = params.getTextDocument().getUri()
         documentManager.closeDocument(uri)
-
-        // Clear diagnostics for closed document
         client match
             case c: LanguageClient =>
                 c.publishDiagnostics(PublishDiagnosticsParams(uri, List.empty.asJava))
@@ -50,38 +49,47 @@ class RengbisTextDocumentService extends TextDocumentService:
         val uri      = params.getTextDocument().getUri()
         val position = params.getPosition()
 
-        documentManager.getDocument(uri) match
-            case Some(doc) =>
-                val items = completionProvider.provideCompletions(doc.text, position)
-                CompletableFuture.completedFuture(JEither.forLeft(items.asJava))
-            case None      =>
-                CompletableFuture.completedFuture(JEither.forLeft(List.empty.asJava))
+        if uri.endsWith(".rengbis")
+        then
+            documentManager.getDocument(uri) match
+                case Some(doc) =>
+                    val items = completionProvider.provideCompletions(doc.text, position)
+                    CompletableFuture.completedFuture(JEither.forLeft(items.asJava))
+                case None      =>
+                    CompletableFuture.completedFuture(JEither.forLeft(List.empty.asJava))
+        else CompletableFuture.completedFuture(JEither.forLeft(List.empty.asJava))
 
     override def hover(params: HoverParams): CompletableFuture[Hover] =
         val uri      = params.getTextDocument().getUri()
         val position = params.getPosition()
 
-        documentManager.getDocument(uri) match
-            case Some(doc) =>
-                hoverProvider.provideHover(doc.text, position) match
-                    case Some(hover) => CompletableFuture.completedFuture(hover)
-                    case None        => CompletableFuture.completedFuture(null)
-            case None      =>
-                CompletableFuture.completedFuture(null)
+        if uri.endsWith(".rengbis")
+        then
+            documentManager.getDocument(uri) match
+                case Some(doc) =>
+                    hoverProvider.provideHover(doc.text, position) match
+                        case Some(hover) => CompletableFuture.completedFuture(hover)
+                        case None        => CompletableFuture.completedFuture(null)
+                case None      =>
+                    CompletableFuture.completedFuture(null)
+        else CompletableFuture.completedFuture(null)
 
     override def definition(params: DefinitionParams): CompletableFuture[JEither[java.util.List[? <: Location], java.util.List[? <: LocationLink]]] =
         val uri      = params.getTextDocument().getUri()
         val position = params.getPosition()
 
-        documentManager.getDocument(uri) match
-            case Some(doc) =>
-                definitionProvider.provideDefinition(uri, doc.text, position) match
-                    case Some(location) =>
-                        CompletableFuture.completedFuture(JEither.forLeft(List(location).asJava))
-                    case None           =>
-                        CompletableFuture.completedFuture(JEither.forLeft(List.empty.asJava))
-            case None      =>
-                CompletableFuture.completedFuture(JEither.forLeft(List.empty.asJava))
+        if uri.endsWith(".rengbis")
+        then
+            documentManager.getDocument(uri) match
+                case Some(doc) =>
+                    definitionProvider.provideDefinition(uri, doc.text, position) match
+                        case Some(location) =>
+                            CompletableFuture.completedFuture(JEither.forLeft(List(location).asJava))
+                        case None           =>
+                            CompletableFuture.completedFuture(JEither.forLeft(List.empty.asJava))
+                case None      =>
+                    CompletableFuture.completedFuture(JEither.forLeft(List.empty.asJava))
+        else CompletableFuture.completedFuture(JEither.forLeft(List.empty.asJava))
 
     override def documentSymbol(params: DocumentSymbolParams): CompletableFuture[java.util.List[JEither[SymbolInformation, DocumentSymbol]]] =
         // TODO: Implement document symbols for outline view
@@ -90,6 +98,9 @@ class RengbisTextDocumentService extends TextDocumentService:
     private def publishDiagnostics(uri: String, text: String): Unit =
         client match
             case c: LanguageClient =>
-                val diagnostics = DiagnosticsProvider.provideDiagnostics(uri, text)
+                val diagnostics = DataFileType.fromUri(uri) match
+                    case Some(fileType)                   => DataFileDiagnosticsProvider.provideDiagnostics(uri, text, fileType, schemaCache)
+                    case None if uri.endsWith(".rengbis") => DiagnosticsProvider.provideDiagnostics(uri, text)
+                    case None                             => List.empty
                 c.publishDiagnostics(PublishDiagnosticsParams(uri, diagnostics.asJava))
             case null              => ()
