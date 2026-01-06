@@ -314,6 +314,9 @@ Older GraalVM versions may require also to install the `native-image` explicitly
 gu install native-image
 ```
 
+> [!NOTE]
+> The native-image currently only supports the `validate-schema` and `validate-data` commands. The `lsp` command requires extensive reflection configuration for the LSP4J library and is not yet fully supported in native-image. For LSP functionality, use the `execjar` build instead.
+
 ## Usage
 The unified `rengbis` executable provides three main commands:
 
