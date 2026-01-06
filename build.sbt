@@ -1,5 +1,7 @@
 // ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
 
+import scala.sys.process._
+
 ThisBuild / organization  := "relax-schema"
 ThisBuild / scalaVersion  := "3.7.4"
 ThisBuild / usePipelining := true
@@ -15,6 +17,8 @@ ThisBuild / scalacOptions ++= Seq(
     "-Xkind-projector",
     "-Wsafe-init"       // experimental (I've seen it cause issues with circe)
 ) ++ Seq("-rewrite", "-indent") ++ Seq("-source", "future")
+
+lazy val execjar = taskKey[File]("Create executable JAR using execjar tool")
 
 lazy val root =
     project
@@ -38,7 +42,40 @@ lazy val root =
             nativeImageOptions ++= Seq(
                 "--no-fallback",
                 "-H:+ReportExceptionStackTraces"
-            )
+            ),
+            execjar                          := {
+                val log        = streams.value.log
+                val jarFile    = assembly.value
+                val outputFile = target.value / "rengbis"
+                val minJavaVer = "17" // Adjust based on your requirements
+
+                log.info(s"Creating executable JAR from ${ jarFile.getName }...")
+
+                // Download and run execjar directly from GitHub releases
+                val execjarVersion = "v0.1.1"
+                val execjarUrl     = s"https://github.com/parttimenerd/execjar/releases/download/$execjarVersion/execjar.jar"
+
+                val execjarCmd = Seq(
+                    "jbang",
+                    execjarUrl,
+                    jarFile.getAbsolutePath,
+                    "-o",
+                    outputFile.getAbsolutePath,
+                    "--min-java-version",
+                    minJavaVer
+                )
+
+                val result = execjarCmd.!
+                if (result != 0) {
+                    sys.error(s"execjar failed with exit code $result. Ensure jbang is installed and available in PATH.")
+                }
+
+                // Make executable
+                s"chmod +x ${ outputFile.getAbsolutePath }".!
+
+                log.info(s"Executable JAR created at: $outputFile")
+                outputFile
+            }
         )
 
 // lazy val commonScalacOptions = Seq(
