@@ -278,7 +278,7 @@ The `core` module can be built as a library JAR for use in other projects:
 sbt assembly
 ```
 
-This creates `modules/core/target/scala-3.7.4/rengbis-core.jar` - a fat JAR containing all dependencies that can be used in other projects.
+This creates `modules/core/target/scala-3.7.4/rengbis.jar` - a fat JAR containing all dependencies that can be used in other projects.
 
 ### Executable JAR (for end users)
 Create a self-contained executable using the [ExecJar](https://github.com/parttimenerd/execjar) project:
@@ -287,7 +287,7 @@ Create a self-contained executable using the [ExecJar](https://github.com/partti
 sbt execjar
 ```
 
-This creates `modules/cli/target/rengbis` - an executable that includes the JVM launcher. Requires [jbang](https://www.jbang.dev) to build:
+This creates `modules/cli/target/execjar/rengbis-cli` - an executable that includes the JVM launcher. Requires [jbang](https://www.jbang.dev) to build:
 ```bash
 sdk install jbang
 ```

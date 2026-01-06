@@ -52,7 +52,7 @@ lazy val core = project
     .settings(coreDependencies)
     .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
     .settings(
-        assembly / assemblyJarName       := "rengbis-core.jar",
+        assembly / assemblyJarName       := "rengbis.jar",
         assembly / assemblyMergeStrategy := {
             case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
             case PathList("META-INF", xs @ _*)             => MergeStrategy.discard
@@ -102,7 +102,7 @@ lazy val cli = project
         execjar                          := {
             val log        = streams.value.log
             val jarFile    = assembly.value
-            val outputFile = target.value / "rengbis"
+            val outputFile = target.value / "execjar" / "rengbis-cli"
             val minJavaVer = "17"
 
             log.info(s"Creating executable JAR from ${ jarFile.getName }...")
