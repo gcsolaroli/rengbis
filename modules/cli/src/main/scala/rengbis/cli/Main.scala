@@ -1,11 +1,13 @@
-package rengbis
+package rengbis.cli
 
+import rengbis.{ DataParsers, Schema, Validator }
 import zio.cli.HelpDoc.Span.text
 
 import java.nio.file.{ Files, Path }
 import zio.{ Console, ZIO }
 import zio.cli.Options
 import zio.cli.{ Args, CliApp, Command, Exists, HelpDoc, ZIOCliDefault }
+import java.util.logging.LogManager
 
 object Main extends ZIOCliDefault:
 
@@ -15,6 +17,7 @@ object Main extends ZIOCliDefault:
     enum RengbisCommand:
         case ValidateSchema(schemaFiles: List[Path])
         case ValidateData(format: Format, schemaFile: Path, dataFiles: List[Path])
+        case Lsp
 
     val formatOption: Options[Format] =
         Options
@@ -39,6 +42,9 @@ object Main extends ZIOCliDefault:
     val validateDataHelp: HelpDoc =
         HelpDoc.p("Validate data files against a rengbis schema.")
 
+    val lspHelp: HelpDoc =
+        HelpDoc.p("Start the Language Server Protocol (LSP) server for editor integration.")
+
     def validateSchemaCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
         Command("validate-schema", Options.none, filesArg(exists))
             .withHelp(validateSchemaHelp)
@@ -51,10 +57,15 @@ object Main extends ZIOCliDefault:
                 RengbisCommand.ValidateData(format, schemaFile, dataFiles)
             }
 
+    def lspCommand: Command[RengbisCommand] =
+        Command("lsp", Options.none, Args.none)
+            .withHelp(lspHelp)
+            .map(_ => RengbisCommand.Lsp)
+
     def buildCommand(exists: Exists): Command[RengbisCommand] =
         Command("rengbis")
             .withHelp(HelpDoc.p("ReNGBis - A content schema definition language for validating payloads."))
-            .subcommands(validateSchemaCommand(exists), validateDataCommand(exists))
+            .subcommands(validateSchemaCommand(exists), validateDataCommand(exists), lspCommand)
 
     val command: Command[RengbisCommand] = buildCommand(Exists.Yes)
 
@@ -70,6 +81,7 @@ object Main extends ZIOCliDefault:
         cmd match
             case RengbisCommand.ValidateSchema(schemaFiles)                 => validateSchemas(schemaFiles)
             case RengbisCommand.ValidateData(format, schemaFile, dataFiles) => validateData(format, schemaFile, dataFiles)
+            case RengbisCommand.Lsp                                         => startLspServer()
 
     def validateSchemas(files: List[Path]): ZIO[Any, Throwable, Unit] =
         ZIO.foreach(files) { file =>
@@ -111,3 +123,22 @@ object Main extends ZIOCliDefault:
             _       <- Console.printLine(s"\nSummary: $valid valid, $invalid invalid out of $total file(s)")
             _       <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
         yield ()
+
+    def startLspServer(): ZIO[Any, Throwable, Unit] =
+        ZIO.attempt:
+            import org.eclipse.lsp4j.launch.LSPLauncher
+            import rengbis.lsp.RengbisLanguageServer
+
+            // Disable default logging to avoid interference with LSP communication
+            LogManager.getLogManager().reset()
+
+            val server   = RengbisLanguageServer()
+            val launcher = LSPLauncher.createServerLauncher(
+                server,
+                System.in,
+                System.out
+            )
+
+            val client = launcher.getRemoteProxy()
+            server.connect(client)
+            launcher.startListening().get() // Block until the connection is closed
