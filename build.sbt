@@ -1,5 +1,7 @@
 // ThisBuild / resolvers ++= Resolver.sonatypeOssRepos("snapshots")
 
+import scala.sys.process._
+
 ThisBuild / organization  := "relax-schema"
 ThisBuild / scalaVersion  := "3.7.4"
 ThisBuild / usePipelining := true
@@ -16,7 +18,66 @@ ThisBuild / scalacOptions ++= Seq(
     "-Wsafe-init"       // experimental (I've seen it cause issues with circe)
 ) ++ Seq("-rewrite", "-indent") ++ Seq("-source", "future")
 
-// Dependency versions
+lazy val execjar = taskKey[File]("Create executable JAR using execjar tool")
+
+lazy val root =
+    project
+        .in(file("."))
+        .enablePlugins(NativeImagePlugin)
+        .settings(name := "rengbis")
+        .settings(version := "0.0.1-SNAPSHOT")
+        .settings(dependencies)
+        .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
+        .settings(
+            assembly / mainClass             := Some("rengbis.Main"),
+            assembly / assemblyJarName       := "rengbis.jar",
+            assembly / assemblyMergeStrategy := {
+                case PathList("META-INF", "services", xs @ _*) => MergeStrategy.concat
+                case PathList("META-INF", xs @ _*)             => MergeStrategy.discard
+                case x if x.endsWith("module-info.class")      => MergeStrategy.discard
+                case x                                         => MergeStrategy.first
+            },
+            Compile / mainClass              := Some("rengbis.Main"),
+            nativeImageInstalled             := true, // Use system-installed native-image from GRAALVM_HOME or PATH
+            nativeImageOptions ++= Seq(
+                "--no-fallback",
+                "-H:+ReportExceptionStackTraces"
+            ),
+            execjar                          := {
+                val log        = streams.value.log
+                val jarFile    = assembly.value
+                val outputFile = target.value / "rengbis"
+                val minJavaVer = "17" // Adjust based on your requirements
+
+                log.info(s"Creating executable JAR from ${ jarFile.getName }...")
+
+                // Download and run execjar directly from GitHub releases
+                val execjarVersion = "v0.1.1"
+                val execjarUrl     = s"https://github.com/parttimenerd/execjar/releases/download/$execjarVersion/execjar.jar"
+
+                val execjarCmd = Seq(
+                    "jbang",
+                    execjarUrl,
+                    jarFile.getAbsolutePath,
+                    "-o",
+                    outputFile.getAbsolutePath,
+                    "--min-java-version",
+                    minJavaVer
+                )
+
+                val result = execjarCmd.!
+                if (result != 0) {
+                    sys.error(s"execjar failed with exit code $result. Ensure jbang is installed and available in PATH.")
+                }
+
+                // Make executable
+                s"chmod +x ${ outputFile.getAbsolutePath }".!
+
+                log.info(s"Executable JAR created at: $outputFile")
+                outputFile
+            }
+        )
+
 val zio            = "2.1.16"
 val zio_json       = "0.7.39"
 val zio_parser     = "0.1.11"
@@ -24,7 +85,6 @@ val zio_cli        = "0.7.4"
 val yaml4s_version = "0.3.0"
 val lsp4j_version  = "0.23.1"
 
-// Root project - aggregates all modules
 lazy val root = project
     .in(file("."))
     .settings(
@@ -34,7 +94,6 @@ lazy val root = project
     )
     .aggregate(core, lsp)
 
-// Core module - schema parser, validator, and data parsers
 lazy val core = project
     .in(file("modules/core"))
     .enablePlugins(NativeImagePlugin)
@@ -61,7 +120,6 @@ lazy val core = project
         )
     )
 
-// LSP module - Language Server Protocol implementation
 lazy val lsp = project
     .in(file("modules/lsp"))
     .dependsOn(core)

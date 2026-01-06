@@ -273,8 +273,25 @@ This file can then be used like a regular `java` application:
 java -jar modules/core/target/scala-3.7.4/rengbis.jar validate-schema schema.rengbis
 ```
 
+### execJar
+It's also possible to create an executable jar, leveraging the [ExecJar](https://github.com/parttimenerd/execjar) project.
+
+In order to do so, the `jbang` [command](https://www.jbang.dev) needs to be available:
+> sdk install jbang
+
+Once `jbang` is available, it's possible to run the `sbt execjar` command to create an executable version of the program; this application will still need a JVM to run, but the embedded script takes care of all the details to let this happen almost auto-magically.
+
+The `minJavaVer` is not set at 17, but the script has only been currently tested with Java `25.0.1`, so [YMMV](https://en.wiktionary.org/wiki/YMMV#English)
+
 ### Native binary
 Using the `sbt core/nativeImage` it is possible to build a native executable, `modules/core/target/native-image/rengbis`.
+
+In order for this command to correctly work, a version of `native-version` needs to be configured on the system.
+> sdk install java 25.0.1-graalce
+> sdk use java 25.0.1-graalce
+
+Previous version of Graal may require the installation of the `native-image` using the `gu` *GraalVM Updater*.
+> gu install native-image
 
 ## Editor Support
 
