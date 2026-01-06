@@ -1,11 +1,13 @@
-package rengbis
+package rengbis.cli
 
+import rengbis.{ DataParsers, Schema, Validator }
 import zio.cli.HelpDoc.Span.text
 
 import java.nio.file.{ Files, Path }
 import zio.{ Console, ZIO }
 import zio.cli.Options
 import zio.cli.{ Args, CliApp, Command, Exists, HelpDoc, ZIOCliDefault }
+import java.util.logging.LogManager
 
 object Main extends ZIOCliDefault:
 

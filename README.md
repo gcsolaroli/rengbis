@@ -13,12 +13,12 @@ Thanks to [Tim Bray](https://www.tbray.org/ongoing/misc/Tim) for [suggesting](ht
 Most schema definition languages are pretty tedious to use; the only "enjoyable" schema language I have met is the compact syntax of [RELAX NG](https://en.wikipedia.org/wiki/RELAX_NG); its project and tools are pretty stale (they were last updated in the early 2000), but they still work wonders for processing XML files.
 RELAX NG affordance in defining a schema beates XSD hands down.
 
-This project is an experiment to try to replicate the convenience and affordance of RELAX NG schema definition getting rid of the tight binding with XML, making it suitable to validate payloads of multiple serialization protocols.
+This project is an experiment to try to replicate the convenience and affordance of RELAX NG schema definition, but getting rid of the tight binding with XML and making it suitable to validate payloads of multiple serialization formats.
 
 ## How does it compare to alternative options
-The closest alternative I have spotted is [CUE](https://cuelang.org/), even though I discoverd it only after having already worked on this project. I will have to investigate the CUE project further to understand if this is just an half baked duplicated effort, or there are some differences that may justify the effort to push this project forward.
+The closest alternative I have spotted so far is [CUE](https://cuelang.org/), even though I discoverd it only after having already started this project. I will have to investigate the CUE project further to understand if this is just an half baked duplicated effort, or there are some differences that may justify the effort to push this project forward.
 
-I personally don't like working neither with XSD nor JSON-Schema; their choice of defining a schema using the same structure and syntax used for serializing the same data that needs to be specified does not seem like an effective option to me as you end up being constrained by choices suitable for a problem (effectively marshalling values) while solving a completely different problem (define valid values).
+I personally don't like working neither with XSD nor JSON-Schema; their choice of defining a schema using the same structure and syntax used for serializing the data itself is a self imposed constraint that provides very little value.
 
 # Examples
 Here are some examples of a `rengbis` definitions taken from the [tests](./src/test/scala/rengbis/ValidatorSpec.scala).
@@ -71,7 +71,7 @@ The current implementation provides helpers to validate `xml`, `json`, and `yaml
 
 The current implementation encodes all the values using the `rengbis.Value` class before validating their content.
 
-# Features
+# Schema features
 Here is a brief run down of the currently supported features
 
 ## Basic value types and Alternative options
@@ -101,7 +101,6 @@ service = { name: text, port?: number }
     services: { …: service }
 }
 ```
-
 
 ## Named structures
 ```rengbis
@@ -231,7 +230,6 @@ registeredPortNumber = number [ integer, 1024 <= value < 49152 ]
 ephemeralPortNumber = number [ integer, 49152 <= value <= 65535 ]
 ```
 
-
 ## Comments
 Anything after a `#` character, up to the end of the line, is ignored by the parser and thus treated as a comment.
 
@@ -263,32 +261,69 @@ Before venturing in this experiment, I did many tries with [`zio-schema`](https:
 [Lately](https://x.com/jdegoes/status/1919380595597090856) a [new version](https://github.com/zio/zio-blocks) of `zio-schema` has been announced; I haven't had the time to play with it yet, but the idea of using `rengbis` as a language to define `zio-schema` values that could be later leveraged to validate/parse actual payloads, getting rid of the custom  machinary I had to build myself seems an interesting option to validate.
 
 
-## Build options
+## Project Structure
 
-### Fat JAR
-Using the `sbt assembly` command you get a fat JAR in `target/scala-3.7.4/rengbis.jar`.
+The project is organized into three distinct modules:
 
-This file can then be used like a regular `java` application:
-```shell
-java -jar target/scala-3.7.4/rengbis.jar validate-schema schema.rengbis
+- **`core`** - Pure library module with schema parsing and validation logic. Can be used as a dependency in other projects.
+- **`cli`** - Executable wrapper that provides a unified command-line interface for all functionality.
+
+## Build Options
+
+### Library JAR (for developers)
+The `core` module can be built as a library JAR for use in other projects:
+
+```bash
+sbt assembly
 ```
 
-### execJar
-It's also possible to create an executable jar, leveraging the [ExecJar](https://github.com/parttimenerd/execjar) project.
+This creates `modules/core/target/scala-3.7.4/rengbis.jar` - a fat JAR containing all dependencies that can be used in other projects.
 
-In order to do so, the `jbang` [command](https://www.jbang.dev) needs to be available:
-> sdk install jbang
+### Executable JAR (for end users)
+Create a self-contained executable using the [ExecJar](https://github.com/parttimenerd/execjar) project:
 
-Once `jbang` is available, it's possible to run the `sbt execjar` command to create an executable version of the program; this application will still need a JVM to run, but the embedded script takes care of all the details to let this happen almost auto-magically.
+```bash
+sbt execjar
+```
 
-The `minJavaVer` is not set at 17, but the script has only been currently tested with Java `25.0.1`, so [YMMV](https://en.wiktionary.org/wiki/YMMV#English)
+This creates `modules/cli/target/execjar/rengbis-cli` - an executable that includes the JVM launcher. Requires [jbang](https://www.jbang.dev) to build:
+```bash
+sdk install jbang
+```
 
-### Native binary
-Using the `sbt nativeImage` it is possible to build a native executables, `target/native-image/rengbis`.
+The executable is currently set to require Java 17+ to run, but no actual tests have been run to verify if this constraint is relevant. At the moment it has only been tested with Java 25.0.1, so [YMMV](https://en.wiktionary.org/wiki/YMMV#English).
 
-In order for this command to correctly work, a version of `native-version` needs to be configured on the system.
-> sdk install java 25.0.1-graalce
-> sdk use java 25.0.1-graalce
+### Native Binary
+Build a native executable using GraalVM:
 
-Previous version of Graal may require the installation of the `native-image` using the `gu` *GraalVM Updater*.
-> gu install native-image
+```bash
+sbt nativeImage
+```
+
+This creates `modules/cli/target/native-image/rengbis-cli` - a standalone native binary with no JVM required.
+
+To build native images, install GraalVM:
+```bash
+sdk install java 25.0.1-graalce
+sdk use java 25.0.1-graalce
+```
+
+Older GraalVM versions may require also to install the `native-image` explicitly, using GraalVM Updater (`gu`):
+```bash
+gu install native-image
+```
+
+## Usage
+The unified `rengbis` executable provides three main commands:
+
+### Validate Schema Files
+```bash
+rengbis validate-schema schema1.rengbis schema2.rengbis
+```
+
+### Validate Data Files
+```bash
+rengbis validate-data --format json --schema schema.rengbis data1.json data2.json
+```
+
+Supported formats: `json`, `yaml`, `xml`

@@ -1,11 +1,11 @@
-package rengbis
+package rengbis.cli
 
 import zio.test.{ assertTrue, ZIOSpecDefault }
 import zio.test.TestResult.allSuccesses
 import zio.ZIO
 import zio.cli.{ CliConfig, CliError, CommandDirective }
 import java.nio.file.{ Files, Paths }
-import rengbis.Main.{ Format, RengbisCommand }
+import rengbis.cli.Main.{ Format, RengbisCommand }
 import zio.test.{ assertZIO, TestConstructor, TestResult }
 import zio.test.Assertion.equalTo
 import zio.internal.stacktracer.{ SourceLocation, Tracer }
