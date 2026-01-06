@@ -12,26 +12,26 @@ This module provides Language Server Protocol support for ReNGBis schema files, 
 
 ## Building
 
-Build the LSP server JAR:
+Build the unified executable:
 
 ```bash
-sbt lsp/assembly
+sbt execjar
 ```
 
-This creates `modules/lsp/target/scala-3.7.4/rengbis-lsp.jar`.
+This creates `modules/cli/target/rengbis` - an executable that includes all functionality (validation and LSP).
 
 ## Running
 
-Use the provided launcher script from the project root:
+Start the LSP server using the `lsp` subcommand:
 
 ```bash
-./rengbis-lsp
+modules/cli/target/rengbis lsp
 ```
 
-Or run the JAR directly:
+Or using `sbt` directly during development:
 
 ```bash
-java -jar modules/lsp/target/scala-3.7.4/rengbis-lsp.jar
+sbt "cli/run lsp"
 ```
 
 The LSP server communicates via stdin/stdout using the JSON-RPC protocol.
@@ -47,7 +47,7 @@ The LSP server communicates via stdin/stdout using the JSON-RPC protocol.
 ```json
 {
   "lsp-client.languageId": "rengbis",
-  "lsp-client.serverCommand": "/absolute/path/to/rengbis/rengbis-lsp"
+  "lsp-client.serverCommand": "/absolute/path/to/rengbis/modules/cli/target/rengbis lsp"
 }
 ```
 
@@ -115,11 +115,11 @@ let client: LanguageClient;
 
 export function activate(context: ExtensionContext) {
   const serverCommand = workspace.getConfiguration('rengbis').get<string>('lspPath') 
-    || '/absolute/path/to/rengbis-lsp';
+    || '/absolute/path/to/rengbis';
   
   const serverOptions: ServerOptions = {
     command: serverCommand,
-    args: []
+    args: ['lsp']
   };
 
   const clientOptions: LanguageClientOptions = {
@@ -155,7 +155,7 @@ local configs = require('lspconfig.configs')
 if not configs.rengbis then
   configs.rengbis = {
     default_config = {
-      cmd = { '/absolute/path/to/rengbis-lsp' },
+      cmd = { '/absolute/path/to/rengbis', 'lsp' },
       filetypes = { 'rengbis' },
       root_dir = lspconfig.util.root_pattern('.git', 'schemas'),
       settings = {},
@@ -193,7 +193,7 @@ Using [lsp-mode](https://emacs-lsp.github.io/lsp-mode/):
 ;; Register LSP server
 (lsp-register-client
  (make-lsp-client
-  :new-connection (lsp-stdio-connection "/absolute/path/to/rengbis-lsp")
+  :new-connection (lsp-stdio-connection '("/absolute/path/to/rengbis" "lsp"))
   :major-modes '(rengbis-mode)
   :server-id 'rengbis-lsp))
 
@@ -213,7 +213,7 @@ Using [LSP package](https://packagecontrol.io/packages/LSP):
   "clients": {
     "rengbis": {
       "enabled": true,
-      "command": ["/absolute/path/to/rengbis-lsp"],
+      "command": ["/absolute/path/to/rengbis", "lsp"],
       "selector": "source.rengbis"
     }
   }
@@ -247,7 +247,7 @@ Use the [LSP Support plugin](https://plugins.jetbrains.com/plugin/10209-lsp-supp
 2. Go to Settings > Languages & Frameworks > Language Server Protocol > Server Definitions
 3. Add a new server definition:
    - Extension: `rng,rengbis`
-   - Command: `/absolute/path/to/rengbis-lsp`
+   - Command: `/absolute/path/to/rengbis lsp`
 
 ### Zed
 
@@ -268,8 +268,8 @@ Use the [LSP Support plugin](https://plugins.jetbrains.com/plugin/10209-lsp-supp
   "lsp": {
     "rengbis-lsp": {
       "binary": {
-        "path": "/absolute/path/to/rengbis-lsp",
-        "arguments": []
+        "path": "/absolute/path/to/rengbis",
+        "arguments": ["lsp"]
       }
     }
   }
@@ -278,7 +278,7 @@ Use the [LSP Support plugin](https://plugins.jetbrains.com/plugin/10209-lsp-supp
 
 3. Restart Zed or reload the window
 
-**Note**: Replace `/absolute/path/to/rengbis-lsp` with the actual absolute path to your launcher script.
+**Note**: Replace `/absolute/path/to/rengbis` with the actual absolute path to your rengbis executable.
 
 #### Alternative: Project-specific configuration
 
@@ -289,7 +289,8 @@ For project-specific settings, create a `.zed/settings.json` file in your projec
   "lsp": {
     "rengbis-lsp": {
       "binary": {
-        "path": "/absolute/path/to/rengbis-lsp"
+        "path": "/absolute/path/to/rengbis",
+        "arguments": ["lsp"]
       }
     }
   }
@@ -331,8 +332,8 @@ name = "rengbis-lsp"
 language_id = "rengbis"
 
 [language_server.binary]
-path = "/absolute/path/to/rengbis-lsp"
-args = []
+path = "/absolute/path/to/rengbis"
+args = ["lsp"]
 ```
 
 After creating the extension, restart Zed to load it.
@@ -362,8 +363,8 @@ Try hovering over keywords like `text`, `number`, `regex`, `value` to see docume
 
 ### LSP server not starting
 
-1. Verify the JAR was built: `ls -l modules/lsp/target/scala-3.7.4/rengbis-lsp.jar`
-2. Test the launcher script: `./modules/lsp/rengbis-lsp` (it should wait for input)
+1. Verify the executable was built: `ls -l modules/cli/target/rengbis`
+2. Test the LSP command: `modules/cli/target/rengbis lsp` (it should wait for input)
 3. Check your editor's LSP client logs for error messages
 
 ### No completions or hover information
@@ -375,8 +376,8 @@ Try hovering over keywords like `text`, `number`, `regex`, `value` to see docume
 ### Syntax errors not showing
 
 1. The LSP server depends on the core parser from the `core` module
-2. Ensure both modules were compiled: `sbt core/compile lsp/compile`
-3. Rebuild the JAR: `sbt lsp/assembly`
+2. Ensure all modules were compiled: `sbt compile`
+3. Rebuild the executable: `sbt execjar`
 
 ## Architecture
 
