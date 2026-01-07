@@ -1,0 +1,5 @@
+Definition_Split = {
+    name: text
+}
+
+= Definition_Split
