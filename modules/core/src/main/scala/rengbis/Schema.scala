@@ -340,7 +340,7 @@ object Schema:
         )
 
         val namedValueReference: SchemaSyntax[Schema.NamedValueReference] = (
-            (Syntax.letter ~ Syntax.alphaNumeric.repeat0).string
+            (Syntax.letter ~ (Syntax.alphaNumeric <> Syntax.charIn("_-")).repeat0).string
         ).transform(
             label => NamedValueReference(label),
             schema => schema.reference
