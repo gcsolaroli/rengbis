@@ -1,7 +1,9 @@
 package rengbis
 
+import java.nio.file.Path
 import zio.Chunk
-import rengbis.Schema.*
+import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TupleValue }
+import rengbis.Schema.{ ListConstraint, NumericConstraint, TextConstraint }
 import scala.util.{ Failure, Success, Try }
 
 object Validator:
@@ -28,9 +30,9 @@ object Validator:
             if errors.isEmpty then ValidationResult.valid
             else ValidationResult(Chunk.fromIterable(errors))
 
-    def validateString(dataParser: (String) => Either[String, Value])(schema: Schema, string: String): ValidationResult = dataParser(string) match
-        case Left(message)    => ValidationResult.reportError(message)
-        case Right(jsonValue) => validateValue(schema, jsonValue)
+    def validate[A](dataParser: (A) => Either[String, Value])(schema: Schema, data: A): ValidationResult = dataParser(data) match
+        case Left(message) => ValidationResult.reportError(message)
+        case Right(value)  => validateValue(schema, value)
 
     // ========================================================================
 
@@ -161,16 +163,16 @@ object Validator:
                 case _                      => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
         case ListOfValues(s, constraints*) =>
             value match
-                case Value.ArrayOfValues(values) =>
+                case Value.ListOfValues(values) =>
                     ValidationResult.summarize(
                         constraints.map(c => validateListConstraints(c, values, s)) ++
                             values.map(v => validateValue(s, v))
                     )
-                case value                       => ValidationResult.reportError(s"expected list of values; ${ value.valueTypeDescription } found [value: ${ value }]")
+                case value                      => ValidationResult.reportError(s"expected list of values; ${ value.valueTypeDescription } found [value: ${ value }]")
         case TupleValue(options*)          =>
             value match
                 case Value.TupleOfValues(values) => ValidationResult.summarize(options.zipAll(values, Schema.Fail(), Value.Fail()).map((s, v) => validateValue(s, v)))
-                case Value.ArrayOfValues(values) => ValidationResult.summarize(options.zipAll(values, Schema.Fail(), Value.Fail()).map((s, v) => validateValue(s, v)))
+                case Value.ListOfValues(values)  => ValidationResult.summarize(options.zipAll(values, Schema.Fail(), Value.Fail()).map((s, v) => validateValue(s, v)))
                 case value                       => ValidationResult.reportError(s"expected tuple of values; ${ value.valueTypeDescription } found [value: ${ value }]")
         case AlternativeValues(options*)   =>
             options

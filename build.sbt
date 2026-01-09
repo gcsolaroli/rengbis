@@ -21,6 +21,7 @@ val zio_json       = "0.7.45"
 val zio_parser     = "0.1.11"
 val zio_cli        = "0.7.4"
 val yaml4s_version = "0.3.2"
+// val tototoshi_csv_version = "2.0.0"
 
 lazy val execjar = taskKey[File]("Create executable JAR using execjar tool")
 
@@ -115,6 +116,7 @@ lazy val coreDependencies = Seq(
         "dev.zio"                %% "zio-parser"      % zio_parser,
         "dev.hnaderi"            %% "yaml4s-backend"  % yaml4s_version,
         "dev.hnaderi"            %% "yaml4s-zio-json" % yaml4s_version
+        // "com.github.tototoshi"   %% "scala-csv"       % tototoshi_csv_version
     ),
     libraryDependencies ++= Seq(
         "dev.zio" %% "zio-test"     % zio,

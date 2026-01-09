@@ -18,7 +18,7 @@ object Value:
     final case class TextValue(value: String) extends Value:
         def valueTypeDescription: String = s"Text"
 
-    final case class ArrayOfValues(values: Chunk[Value]) extends Value:
+    final case class ListOfValues(values: Chunk[Value]) extends Value:
         def valueTypeDescription: String = s"List"
 
     final case class TupleOfValues(values: Chunk[Value]) extends Value:

@@ -303,7 +303,7 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                 case (Right(_), true)   => assertTrue(false) ?? "expected to be invalid but parsed successfully"
                 case (Left(err), false) => assertTrue(false) ?? s"expected to be valid but failed: $err"
 
-    def getDataFilesForSchema(schemaDir: Path): List[(Path, String => Either[String, Value])] =
+    def getDataFilesForSchema(schemaDir: Path): List[(Path, Path => Either[String, Value])] =
         val formatDirs = Files
             .list(schemaDir)
             .iterator()
@@ -312,8 +312,8 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
             .toList
 
         formatDirs.flatMap { formatDir =>
-            val formatName                                      = formatDir.getFileName.toString.toLowerCase
-            val parser: Option[String => Either[String, Value]] = formatName match
+            val formatName                                    = formatDir.getFileName.toString.toLowerCase
+            val parser: Option[Path => Either[String, Value]] = formatName match
                 case "json" => Some(DataParsers.json)
                 case "yaml" => Some(DataParsers.yaml)
                 case "xml"  => Some(DataParsers.xml)
@@ -331,9 +331,9 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                         .toList
         }
 
-    def dataFileTest(schemaDir: Path, schema: Schema.Schema, dataFile: Path, parser: String => Either[String, Value]): Spec[Any, Nothing] =
-        val content        = Files.readString(dataFile)
-        val result         = Validator.validateString(parser)(schema, content)
+    def dataFileTest(schemaDir: Path, schema: Schema.Schema, dataFile: Path, parser: Path => Either[String, Value]): Spec[Any, Nothing] =
+        // val content        = Files.readString(dataFile)
+        val result         = Validator.validate(parser)(schema, dataFile)
         val expectedToFail = isExpectedToFail(dataFile)
         val formatName     = dataFile.getParent.getFileName.toString
         val relativePath   = s"$formatName/${ dataFile.getFileName }"

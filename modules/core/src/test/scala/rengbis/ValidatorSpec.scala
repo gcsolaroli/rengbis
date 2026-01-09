@@ -3,12 +3,13 @@ package rengbis
 import zio.test.{ assertTrue, TestConsole, ZIOSpecDefault }
 import zio.test.TestResult.allSuccesses
 import zio.Chunk
+import rengbis.Validator.ValidationResult
 
 object ValidatorSpec extends ZIOSpecDefault:
-    val validateYamlString = Validator.validateString(DataParsers.yaml)
-    val validateJsonString = Validator.validateString(DataParsers.json)
-    val validateXmlString  = Validator.validateString(DataParsers.xml)
-    val validateString     = Validator.validateString(DataParsers.text)
+    val validateYamlString: (Schema.Schema, String) => ValidationResult = Validator.validate(DataParsers.yaml)
+    val validateJsonString: (Schema.Schema, String) => ValidationResult = Validator.validate(DataParsers.json)
+    val validateXmlString: (Schema.Schema, String) => ValidationResult  = Validator.validate(DataParsers.xml)
+    val validateString: (Schema.Schema, String) => ValidationResult     = Validator.validate(DataParsers.text)
 
     def parse(text: String): Either[String, Schema.Schema] = SchemaLoader.parseSchema(text).map(s => s.root.get)
 
