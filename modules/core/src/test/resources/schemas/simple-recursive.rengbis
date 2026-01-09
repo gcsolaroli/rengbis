@@ -1,0 +1,9 @@
+Expression = Value | Operation
+Value = number
+Operation = {
+    operator: "+" | "-" | "*" | "/"
+    firstOperand: Value
+    secondoOperand: Expression
+}
+
+= Expression

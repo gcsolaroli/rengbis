@@ -1,9 +1,9 @@
 package rengbis.cli
 
-import rengbis.{ DataParsers, Schema, Validator }
+import rengbis.{ DataParsers, SchemaLoader, Validator }
 import zio.cli.HelpDoc.Span.text
 
-import java.nio.file.{ Files, Path }
+import java.nio.file.{ Files, Path, Paths }
 import zio.{ Console, ZIO }
 import zio.cli.Options
 import zio.cli.{ Args, CliApp, Command, Exists, HelpDoc, ZIOCliDefault }
@@ -16,7 +16,7 @@ object Main extends ZIOCliDefault:
 
     enum RengbisCommand:
         case ValidateSchema(schemaFiles: List[Path])
-        case ValidateData(format: Format, schemaFile: Path, dataFiles: List[Path])
+        case ValidateData(format: Format, schemaFile: Path, schema: Option[String], dataFiles: List[Path])
 
     val formatOption: Options[Format] =
         Options
@@ -27,10 +27,13 @@ object Main extends ZIOCliDefault:
             )
             .alias("f")
 
-    def schemaOption(exists: Exists = Exists.Yes): Options[Path] =
+    def schemaFileOption(exists: Exists = Exists.Yes): Options[Path] =
         Options
             .file("schema", exists)
             .alias("s") ?? "Path to the rengbis schema file"
+
+    def schemaNameOption: Options[Option[String]] =
+        Options.text("name").alias("n").optional
 
     def filesArg(exists: Exists = Exists.Yes): Args[List[Path]] =
         Args.file("files", exists).+ ?? "One or more files to validate"
@@ -47,10 +50,10 @@ object Main extends ZIOCliDefault:
             .map { files => RengbisCommand.ValidateSchema(files) }
 
     def validateDataCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
-        Command("validate-data", formatOption ++ schemaOption(exists), filesArg(exists))
+        Command("validate-data", formatOption ++ schemaFileOption(exists) ++ schemaNameOption, filesArg(exists))
             .withHelp(validateDataHelp)
-            .map { case ((format, schemaFile), dataFiles) =>
-                RengbisCommand.ValidateData(format, schemaFile, dataFiles)
+            .map { case ((format, schemaPath, schemaName), dataFiles) =>
+                RengbisCommand.ValidateData(format, schemaPath, schemaName, dataFiles)
             }
 
     def buildCommand(exists: Exists): Command[RengbisCommand] =
@@ -70,19 +73,18 @@ object Main extends ZIOCliDefault:
 
     def execute(cmd: RengbisCommand): ZIO[Any, Throwable, Unit] =
         cmd match
-            case RengbisCommand.ValidateSchema(schemaFiles)                 => validateSchemas(schemaFiles)
-            case RengbisCommand.ValidateData(format, schemaFile, dataFiles) => validateData(format, schemaFile, dataFiles)
+            case RengbisCommand.ValidateSchema(schemaFiles)                         => validateSchemas(schemaFiles)
+            case RengbisCommand.ValidateData(format, schemaFile, schema, dataFiles) => validateData(format, schemaFile, schema, dataFiles)
 
-    def validateSchemas(files: List[Path]): ZIO[Any, Throwable, Unit] =
-        ZIO.foreach(files) { file =>
-            for
-                result <- ZIO.succeed(Schema.parseFile(file))
-                _      <- result match
-                              case Right(_)    =>
-                                  Console.printLine(s"✓ ${ file.getFileName }: valid")
-                              case Left(error) =>
-                                  Console.printLine(s"✗ ${ file.getFileName }: $error")
-            yield result.isRight
+    def validateSchemas(paths: List[Path]): ZIO[Any, Throwable, Unit] =
+        ZIO.foreach(paths) { path =>
+            val result = SchemaLoader.loadSchemaAtPath(path)
+            result match
+                case Right(_)    =>
+                    Console.printLine(s"✓ ${ path.getFileName }: valid")
+                case Left(error) =>
+                    Console.printLine(s"✗ ${ path.getFileName }: $error")
+            ZIO.succeed(result.isRight)
         }.flatMap { results =>
             val total   = results.size
             val valid   = results.count(identity)
@@ -91,25 +93,28 @@ object Main extends ZIOCliDefault:
                 ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid schema(s) failed validation")))
         }.unit
 
-    def validateData(format: Format, schemaFile: Path, dataFiles: List[Path]): ZIO[Any, Throwable, Unit] =
+    def validateData(format: Format, schemaFile: Path, schema: Option[String], dataFiles: List[Path]): ZIO[Any, Throwable, Unit] =
         for
-            schema  <- ZIO.fromEither(Schema.parseFile(schemaFile)).mapError(e => new RuntimeException(s"Failed to parse schema ${ schemaFile.getFileName }: $e"))
-            parser   = format match
-                           case Format.Json => DataParsers.json
-                           case Format.Yaml => DataParsers.yaml
-                           case Format.Xml  => DataParsers.xml
-            results <- ZIO.foreach(dataFiles) { file =>
-                           for
-                               content <- ZIO.attempt(Files.readString(file))
-                               result   = Validator.validateString(parser)(schema, content)
-                               _       <-
-                                   if result.isValid then Console.printLine(s"✓ ${ file.getFileName }: valid")
-                                   else Console.printLine(s"✗ ${ file.getFileName }:\n${ result.errorMessage }")
-                           yield result.isValid
-                       }
-            total    = results.size
-            valid    = results.count(identity)
-            invalid  = total - valid
-            _       <- Console.printLine(s"\nSummary: $valid valid, $invalid invalid out of $total file(s)")
-            _       <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
+            loadedSchema  <- ZIO.fromEither(SchemaLoader.loadSchemaAtPath(schemaFile)).mapError(e => new RuntimeException(s"Failed to parse schema ${ schemaFile.getFileName }: $e"))
+            selectedSchema = schema match
+                                 case Some(s) => loadedSchema.definitions(s)
+                                 case None    => loadedSchema.root.get
+            parser         = format match
+                                 case Format.Json => DataParsers.json
+                                 case Format.Yaml => DataParsers.yaml
+                                 case Format.Xml  => DataParsers.xml
+            results       <- ZIO.foreach(dataFiles) { file =>
+                                 for
+                                     content <- ZIO.attempt(Files.readString(file))
+                                     result   = Validator.validateString(parser)(selectedSchema, content)
+                                     _       <-
+                                         if result.isValid then Console.printLine(s"✓ ${ file.getFileName }: valid")
+                                         else Console.printLine(s"✗ ${ file.getFileName }:\n${ result.errorMessage }")
+                                 yield result.isValid
+                             }
+            total          = results.size
+            valid          = results.count(identity)
+            invalid        = total - valid
+            _             <- Console.printLine(s"\nSummary: $valid valid, $invalid invalid out of $total file(s)")
+            _             <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
         yield ()

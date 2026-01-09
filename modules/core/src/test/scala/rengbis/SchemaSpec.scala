@@ -4,12 +4,14 @@ import zio.test.{ assertTrue, ZIOSpecDefault }
 import zio.test.TestResult.allSuccesses
 
 import java.nio.file.{ Files, Path, Paths }
-import scala.jdk.CollectionConverters.*
+import scala.jdk.CollectionConverters.IteratorHasAsScala
+import rengbis.Schema.{ AlternativeValues, AnyValue, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, TextValue, TupleValue }
+import rengbis.Schema.{ ListConstraint, NumericConstraint, TextConstraint }
 
-import rengbis.Schema.*
+def parse(text: String): Either[String, Schema.Schema] = SchemaLoader.parseSchema(text).map(s => s.root.get)
 
 object SchemaSpec extends ZIOSpecDefault:
-    def parseTest(text: String, expectedValue: Schema) = test(text) { assertTrue(parse(text) == Right(expectedValue)) }
+    def parseTest(text: String, expectedValue: Schema.Schema) = test(text) { assertTrue(parse(text) == Right(expectedValue)) }
 
     def spec = suite("Schema parsing features")(
         parseTest("= any", AnyValue()),
@@ -87,9 +89,7 @@ object SchemaSpec extends ZIOSpecDefault:
         parseTest(
             """= text* [ unique, 2 <= size <= 5 ]""",
             ListOfValues(TextValue(), ListConstraint.Unique, ListConstraint.MinSize(2), ListConstraint.MaxSize(5))
-        ),
-
-        // ----------------------------------------------------------------
+        ), // ----------------------------------------------------------------
         test("with extra empty lines"):
             val schemaDefinition = """
 
@@ -98,7 +98,7 @@ object SchemaSpec extends ZIOSpecDefault:
 
 """
             assertTrue(parse(schemaDefinition) == Right(AlternativeValues(TextValue(), NumericValue())))
-        , // ----------------------------------------------------------------
+        ,  // ----------------------------------------------------------------
         test("simple JSON/Yaml structure"):
             val schemaDefinition = """= {
 	name: text,
@@ -114,14 +114,14 @@ object SchemaSpec extends ZIOSpecDefault:
             )
 
             assertTrue(parse(schemaDefinition) == Right(expectedSchema))
-        , // ----------------------------------------------------------------
+        ,  // ----------------------------------------------------------------
         test("named value"):
             val schemaDefinition = """
 foo = number*
 = foo
 """
             assertTrue(parse(schemaDefinition) == Right(ListOfValues(NumericValue())))
-        , // ----------------------------------------------------------------
+        ,  // ----------------------------------------------------------------
         test("named values"):
             val schemaDefinition = """
 foo = number*
@@ -129,7 +129,7 @@ bar = text*
 = foo | bar
 """
             assertTrue(parse(schemaDefinition) == Right(AlternativeValues(ListOfValues(NumericValue()), ListOfValues(TextValue()))))
-        , // ----------------------------------------------------------------
+        ,  // ----------------------------------------------------------------
         test("named values inside object"):
             val schemaDefinition = """
 foo = number*
@@ -149,7 +149,7 @@ bar = text*
                     )
                 )
             )
-        , // ----------------------------------------------------------------
+        ,  // ----------------------------------------------------------------
         test("nested named values"):
             val schemaDefinition = """
 foo = number*
@@ -165,7 +165,7 @@ bar = text* | foo
                     )
                 )
             )
-        , // ----------------------------------------------------------------
+        ,  // ----------------------------------------------------------------
         test("named value object"):
             val schemaDefinition = """
 bar = {
@@ -193,7 +193,7 @@ bar = {
                     )
                 )
             )
-        , // ----------------------------------------------------------------
+        ,  // ----------------------------------------------------------------
         test("nested named value object"):
             val schemaDefinition = """
 foo = {
@@ -233,7 +233,7 @@ bar = {
                     )
                 )
             )
-        , // ----------------------------------------------------------------
+        ,  // ----------------------------------------------------------------
         test("simple tuple value"):
             val schemaDefinition = """
 = (text, text, number)
@@ -247,7 +247,7 @@ bar = {
                     )
                 )
             )
-        , // ----------------------------------------------------------------
+        ,  // ----------------------------------------------------------------
         test("tuple value"):
             val schemaDefinition = """
 = (text [ 10 <= length <= 100 ], text [ length <= 10 ], number)
@@ -290,19 +290,10 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
             case i  => fileName.substring(0, i)
         nameWithoutExt.endsWith("-NOT_VALID")
 
-    def getSchemaFiles(schemasDir: Path): List[Path] =
-        Files
-            .list(schemasDir)
-            .iterator()
-            .asScala
-            .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".rengbis"))
-            .toList
-            .sortBy(_.getFileName.toString)
-
     def schemaFileTest(schemaFile: Path): Spec[Any, Nothing] =
         val fileName       = schemaFile.getFileName.toString
         val content        = Files.readString(schemaFile)
-        val parseResult    = Schema.parse(content)
+        val parseResult    = parse(content)
         val expectedToFail = isExpectedToFail(schemaFile)
 
         test(fileName):
@@ -312,7 +303,7 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                 case (Right(_), true)   => assertTrue(false) ?? "expected to be invalid but parsed successfully"
                 case (Left(err), false) => assertTrue(false) ?? s"expected to be valid but failed: $err"
 
-    def getDataFilesForSchema(schemaDir: Path, schema: Schema): List[(Path, String => Either[String, Value])] =
+    def getDataFilesForSchema(schemaDir: Path): List[(Path, String => Either[String, Value])] =
         val formatDirs = Files
             .list(schemaDir)
             .iterator()
@@ -340,7 +331,7 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                         .toList
         }
 
-    def dataFileTest(schemaDir: Path, schema: Schema, dataFile: Path, parser: String => Either[String, Value]): Spec[Any, Nothing] =
+    def dataFileTest(schemaDir: Path, schema: Schema.Schema, dataFile: Path, parser: String => Either[String, Value]): Spec[Any, Nothing] =
         val content        = Files.readString(dataFile)
         val result         = Validator.validateString(parser)(schema, content)
         val expectedToFail = isExpectedToFail(dataFile)
@@ -355,19 +346,28 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                 case (false, false) => assertTrue(false) ?? s"expected to be valid but failed: ${ result.errorMessage }"
 
     def dataSuiteForSchema(schemasDir: Path, schemaDir: Path): Spec[Any, Nothing] =
-        val schemaName    = schemaDir.getFileName.toString
-        val schemaFile    = schemasDir.resolve(s"$schemaName.rengbis")
-        val schemaContent = Files.readString(schemaFile)
+        val schemaName   = schemaDir.getFileName.toString
+        val schemaFile   = schemasDir.resolve(s"$schemaName.rengbis")
+        // val schemaContent = Files.readString(schemaFile)
+        val loadedSchema = SchemaLoader.loadSchemaAtPath(schemaFile).flatMap(_.getRootSchema)
 
-        Schema.parse(schemaContent) match
+        loadedSchema match
             case Left(err)     =>
-                suite(schemaName)(
-                    test("schema parsing")(assertTrue(false) ?? s"schema parse error: $err")
-                )
+                suite(schemaName)(test("schema parsing")(assertTrue(false) ?? s"schema parse error: ${ err }"))
             case Right(schema) =>
-                val dataFiles = getDataFilesForSchema(schemaDir, schema).sortBy(_._1.getFileName.toString)
+                val dataFiles = getDataFilesForSchema(schemaDir).sortBy(_._1.getFileName.toString)
                 val tests     = dataFiles.map { case (dataFile, parser) => dataFileTest(schemaDir, schema, dataFile, parser) }
                 suite(schemaName)(tests*)
+
+    def getSchemaFiles(schemasDir: Path): List[Path] =
+        Files
+            .list(schemasDir)
+            .iterator()
+            .asScala
+            .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".rengbis"))
+            .filter(p => testFilter(p.getFileName.toString))
+            .toList
+            .sortBy(_.getFileName.toString)
 
     def getSchemaDirs(schemasDir: Path): List[Path] =
         Files
@@ -376,8 +376,16 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
             .asScala
             .filter(p => Files.isDirectory(p))
             .filter(p => Files.exists(p.resolveSibling(p.getFileName.toString + ".rengbis")))
+            .filter(p => testFilter(p.getFileName.toString))
             .toList
             .sortBy(_.getFileName.toString)
+
+    def testFilter(filename: String): Boolean =
+        val lastDot  = filename.lastIndexOf('.')
+        val testName = if lastDot > 0 then filename.substring(0, lastDot) else filename
+
+        true
+        // testName == "simple-recursive"
 
     def spec =
         val schemasDir = Paths.get(getClass.getClassLoader.getResource("schemas").toURI)

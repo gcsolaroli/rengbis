@@ -10,6 +10,22 @@ object SchemaLoaderSpec extends ZIOSpecDefault:
 
     type FileValidationResult = (String, Either[String, String])
 
+    def validateFile(structuredDir: Path)(expectedFile: Path): (String, Either[String, String]) =
+        val fileName       = expectedFile.getFileName.toString
+        val structuredFile = structuredDir.resolve(fileName)
+
+        if !Files.exists(structuredFile) then (fileName, Left(s"matching structured file not found: $structuredFile"))
+        else
+            val expectedSchema = SchemaLoader.loadSchemaAtPath(expectedFile)
+            val resolvedSchema = SchemaLoader.loadSchemaAtPath(structuredFile)
+
+            (expectedSchema, resolvedSchema) match
+                case (Left(err), _)           => (fileName, Left(s"failed to parse expected file: $err"))
+                case (_, Left(err))           => (fileName, Left(s"failed to resolve structured file: $err"))
+                case (Right(exp), Right(res)) =>
+                    if exp.root == res.root then (fileName, Right("resolved schema matches expected"))
+                    else (fileName, Left(s"schema mismatch:\n  expected: ${ exp.toString() }\n  resolved: ${ res.toString() }"))
+
     def validateLoaderFiles(loaderDir: Path): Task[List[FileValidationResult]] =
         ZIO.attempt:
             val expectedDir   = loaderDir.resolve("expected")
@@ -20,23 +36,7 @@ object SchemaLoaderSpec extends ZIOSpecDefault:
                 .iterator()
                 .asScala
                 .filter(p => Files.isRegularFile(p) && p.toString.endsWith(".rengbis"))
-                .map { expectedFile =>
-                    val fileName       = expectedFile.getFileName.toString
-                    val structuredFile = structuredDir.resolve(fileName)
-
-                    if !Files.exists(structuredFile) then (fileName, Left(s"matching structured file not found: $structuredFile"))
-                    else
-                        val expectedContent = Files.readString(expectedFile)
-                        val expectedSchema  = Schema.parse(expectedContent)
-                        val resolvedSchema  = Schema.parseFile(structuredFile)
-
-                        (expectedSchema, resolvedSchema) match
-                            case (Left(err), _)           => (fileName, Left(s"failed to parse expected file: $err"))
-                            case (_, Left(err))           => (fileName, Left(s"failed to resolve structured file: $err"))
-                            case (Right(exp), Right(res)) =>
-                                if exp == res then (fileName, Right("resolved schema matches expected"))
-                                else (fileName, Left(s"schema mismatch:\n  expected: $exp\n  resolved: $res"))
-                }
+                .map(validateFile(structuredDir))
                 .toList
 
     def spec = suite("SchemaLoader")(

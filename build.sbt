@@ -16,11 +16,11 @@ ThisBuild / scalacOptions ++= Seq(
     "-Wsafe-init"       // experimental (I've seen it cause issues with circe)
 ) ++ Seq("-rewrite", "-indent") ++ Seq("-source", "future")
 
-val zio            = "2.1.16"
-val zio_json       = "0.7.39"
+val zio            = "2.1.24"
+val zio_json       = "0.7.45"
 val zio_parser     = "0.1.11"
 val zio_cli        = "0.7.4"
-val yaml4s_version = "0.3.0"
+val yaml4s_version = "0.3.2"
 
 lazy val execjar = taskKey[File]("Create executable JAR using execjar tool")
 

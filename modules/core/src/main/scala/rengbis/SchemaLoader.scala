@@ -2,87 +2,48 @@ package rengbis
 
 import java.nio.file.{ Files, Path }
 import zio.Chunk
-import rengbis.Schema.{ ImportStatement, Schema, SchemaSyntax }
 
 object SchemaLoader:
 
-    case class LoadedSchema(
-        path: Path,
-        imports: Map[String, ImportStatement],
-        definitions: Map[String, Schema],
-        rootSchema: Option[Schema]
-    )
+    def loadSchemaAtPath(path: Path): Either[String, ResolvedSchema] = parseSchemaAtPath(path)
+        .flatMap(resolveImports(path, Set.empty))
+        .flatMap(resolveReferences)
 
-    case class ResolvedSchema(
-        allDefinitions: Map[String, Schema],
-        rootSchema: Schema
-    )
+    // ========================================================================
+    //
+    def parseSchemaAtPath(path: Path): Either[String, ParsedSchema] = parseSchema(Files.readString(path))
+    def parseSchema(content: String): Either[String, ParsedSchema]  = Schema
+        .parse(content)
+        .flatMap(resolveParsedReferences)
 
-    def parseSchemaFile(content: String): Either[String, (Map[String, ImportStatement], Map[String, Schema], Option[Schema])] =
-        SchemaSyntax.schema
-            .parseString(content)
-            .left
-            .map(_.pretty)
-            .map { (definitions, rootSchema) =>
-                val imports   = definitions.collect { case (name, imp: ImportStatement) => (name, imp) }.toMap
-                val namedDefs = definitions.collect { case (name, schema) if !schema.isInstanceOf[ImportStatement] => (name, schema) }.toMap
-                (imports, namedDefs, rootSchema.map(_._2))
-            }
+    // ------------------------------------------------------------------------
 
-    def loadSchemaFile(path: Path): Either[String, LoadedSchema] =
+    protected def resolveReferences(schema: ResolvedSchema): Either[String, ResolvedSchema] =
         for
-            content <- Either.cond(Files.exists(path), Files.readString(path), s"File not found: $path")
-            parsed  <- parseSchemaFile(content)
+            definitions <- sequenceEithers(schema.definitions.toSeq.map((scope, s) => s.replaceReferencedValues(schema.definitions.toSeq*).map(d => (scope, d))))
+            root        <- optionEither(schema.root.map(s => s.replaceReferencedValues(definitions.toSeq*)))
+        yield ResolvedSchema(root, definitions.toMap)
 
-            (imports, definitions, rootSchema) = parsed
-        yield LoadedSchema(path, imports, definitions, rootSchema)
-
-    def resolveImports(schema: LoadedSchema, visited: Set[Path] = Set.empty): Either[String, Map[String, Schema]] =
-        if visited.contains(schema.path) then return Left(s"Circular import detected: ${ schema.path }")
-
-        val newVisited    = visited + schema.path
-        val importResults = Schema
-            .sequenceEithers(
-                schema.imports.map { (namespace, importStmt) =>
-                    val importPath = schema.path.getParent.resolve(importStmt.path)
-                    for
-                        imported            <- loadSchemaFile(importPath)
-                        importedWithImports <- resolveImports(imported, newVisited)
-                        resolved            <- resolveInternalReferences(imported, importedWithImports)
-                    yield (namespace, resolved)
-                }.toSeq
-            )
-
-        importResults.flatMap { importedNamespaces =>
-            var globalContext = Map.empty[String, Schema]
-            globalContext ++= schema.definitions
-            schema.rootSchema.foreach { root => globalContext += ("root" -> root) }
-
-            importedNamespaces.foreach { (namespace, importedDefs) =>
-                importedDefs.foreach { (name, defSchema) => if name != "root" then globalContext += (s"$namespace.$name" -> defSchema) }
-                importedDefs.get("root").foreach { rootSchema => globalContext += (namespace -> rootSchema) }
-            }
-            Right(globalContext)
-        }
-
-    private def resolveInternalReferences(schema: LoadedSchema, contextWithImports: Map[String, Schema]): Either[String, Map[String, Schema]] =
-        var localContext = contextWithImports
-        schema.rootSchema.foreach { root => localContext += ("root" -> root) }
-        Schema
-            .sequenceEithers(localContext.map { (name, defSchema) =>
-                defSchema.replaceReferencedValues(localContext.toSeq*).map(resolved => (name, resolved))
-            }.toSeq)
-            .map(_.toMap)
-
-    def loadAndResolve(path: Path): Either[String, ResolvedSchema] =
+    protected def resolveParsedReferences(schema: ParsedSchema): Either[String, ParsedSchema] =
         for
-            loaded          <- loadSchemaFile(path)
-            globalContext   <- resolveImports(loaded)
-            rootSchema      <- loaded.rootSchema.toRight(s"No root schema defined in $path")
-            resolvedRoot    <- rootSchema.replaceReferencedValues(globalContext.toSeq*)
-            resolvedContext <- Schema
-                                   .sequenceEithers(globalContext.map { (name, schema) =>
-                                       schema.replaceReferencedValues(globalContext.toSeq*).map(resolved => (name, resolved))
-                                   }.toSeq)
-                                   .map(_.toMap)
-        yield ResolvedSchema(resolvedContext, resolvedRoot)
+            definitions <- sequenceEithers(schema.definitions.toSeq.map((scope, s) => s.replaceReferencedValues(schema.definitions.toSeq*).map(d => (scope, d))))
+            root        <- optionEither(schema.root.map(s => s.replaceReferencedValues(definitions.toSeq*)))
+        yield ParsedSchema(root, definitions.toMap, schema.imports)
+
+    protected def resolveImports(schemaPath: Path, visited: Set[Path])(schema: ParsedSchema): Either[String, ResolvedSchema] =
+        if visited.contains(schemaPath) then return Left(s"Circular import detected: ${ schemaPath }")
+
+        val newVisited: Set[Path]                                     = visited + schemaPath
+        val importResults: Either[String, Map[String, Schema.Schema]] = sequenceEithers(
+            schema.imports.map { (namespace, path) =>
+                val importPath = schemaPath.getParent.resolve(path)
+                for
+                    parsed: ParsedSchema     <- parseSchemaAtPath(importPath)
+                    imported: ResolvedSchema <- resolveImports(importPath, newVisited)(parsed)
+                    scopedSchemas             = imported.definitions.toList.map((k, v) => (s"${ namespace }.${ k }", v))
+                                                    ++ imported.root.map(r => (namespace, r)).toList
+                yield scopedSchemas
+            }.toSeq
+        ).map(s => s.flatMap(identity).toMap)
+
+        importResults.map(m => ResolvedSchema(schema.root, schema.definitions ++ m))
