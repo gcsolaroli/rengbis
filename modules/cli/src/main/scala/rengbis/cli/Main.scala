@@ -95,24 +95,25 @@ object Main extends ZIOCliDefault:
 
     def validateData(format: Format, schemaFile: Path, schema: Option[String], dataFiles: List[Path]): ZIO[Any, Throwable, Unit] =
         for
-            loadedSchema                  <- ZIO.fromEither(SchemaLoader.loadSchemaAtPath(schemaFile)).mapError(e => new RuntimeException(s"Failed to parse schema ${ schemaFile.getFileName }: $e"))
-            selectedSchema                 = schema match
-                                                 case Some(s) => loadedSchema.definitions(s)
-                                                 case None    => loadedSchema.root.get
-            parser: DataParsers.FileParser = format match
-                                                 case Format.Json => DataParsers.json
-                                                 case Format.Yaml => DataParsers.yaml
-                                                 case Format.Xml  => DataParsers.xml
-            results                       <- ZIO.foreach(dataFiles) { file =>
-                                                 val result = Validator.validate(parser)(selectedSchema, file)
+            loadedSchema                    <- ZIO.fromEither(SchemaLoader.loadSchemaAtPath(schemaFile)).mapError(e => new RuntimeException(s"Failed to parse schema ${ schemaFile.getFileName }: $e"))
+            selectedSchema                   = schema match
+                                                   case Some(s) => loadedSchema.definitions(s)
+                                                   case None    => loadedSchema.root.get
+            // parser: DataParsers.FileParser = format match
+            parser: DataParsers.Parser[Path] = format match
+                                                   case Format.Json => DataParsers.json
+                                                   case Format.Yaml => DataParsers.yaml
+                                                   case Format.Xml  => DataParsers.xml
+            results                         <- ZIO.foreach(dataFiles) { file =>
+                                                   val result = Validator.validate(parser(file))(selectedSchema)
 
-                                                 if result.isValid then Console.printLine(s"✓ ${ file.getFileName }: valid")
-                                                 else Console.printLine(s"✗ ${ file.getFileName }:\n${ result.errorMessage }")
-                                                 ZIO.succeed(result.isValid)
-                                             }
-            total                          = results.size
-            valid                          = results.count(identity)
-            invalid                        = total - valid
-            _                             <- Console.printLine(s"\nSummary: $valid valid, $invalid invalid out of $total file(s)")
-            _                             <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
+                                                   if result.isValid then Console.printLine(s"✓ ${ file.getFileName }: valid")
+                                                   else Console.printLine(s"✗ ${ file.getFileName }:\n${ result.errorMessage }")
+                                                   ZIO.succeed(result.isValid)
+                                               }
+            total                            = results.size
+            valid                            = results.count(identity)
+            invalid                          = total - valid
+            _                               <- Console.printLine(s"\nSummary: $valid valid, $invalid invalid out of $total file(s)")
+            _                               <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
         yield ()

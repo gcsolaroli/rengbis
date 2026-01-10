@@ -11,12 +11,15 @@ object Validator:
     case class ValidationError(message: String)
 
     final case class ValidationResult(value: Valid | Chunk[ValidationError]):
-        def isValid: Boolean     = value match
+        def isValid: Boolean               = value match
             case v: Valid                  => true
             case v: Chunk[ValidationError] => false
-        def errorMessage: String = value match
+        def errorMessage: String           = value match
             case _: Valid                       => ""
             case errors: Chunk[ValidationError] => errors.map(_.message).mkString("\n")
+        def toEither: Either[String, Unit] = value match
+            case v: Valid                  => Right(())
+            case v: Chunk[ValidationError] => Left(v.map(_.message).mkString("\n"))
 
     object ValidationResult:
         def reportError(message: String): ValidationResult                  = ValidationResult(Chunk(ValidationError(message)))
@@ -30,7 +33,7 @@ object Validator:
             if errors.isEmpty then ValidationResult.valid
             else ValidationResult(Chunk.fromIterable(errors))
 
-    def validate[A](dataParser: (A) => Either[String, Value])(schema: Schema, data: A): ValidationResult = dataParser(data) match
+    def validate(validator: ((Schema) => Either[String, Value]))(schema: Schema): ValidationResult = validator(schema) match
         case Left(message) => ValidationResult.reportError(message)
         case Right(value)  => validateValue(schema, value)
 

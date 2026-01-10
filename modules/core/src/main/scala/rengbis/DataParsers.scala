@@ -11,24 +11,29 @@ import dev.hnaderi.yaml4s.Backend
 
 import scala.xml.{ Elem, Node, XML }
 import scala.util.{ Failure, Success, Try }
-import com.github.tototoshi.csv.CSVReader
+// import com.github.tototoshi.csv.CSVReader
 import java.io.StringReader
-import rengbis.Schema.ListOfValues
+import rengbis.Schema.{ ListOfValues, Schema }
 
 object DataParsers:
-    type StringParser = ((String) => Either[String, Value])
-    type FileParser   = ((Path) => Either[String, Value])
+    type Validator = ((Schema) => Either[String, Value])
+    type Parser[A] = (A) => Validator
 
-    def json(file: Path): Either[String, Value]         = json(Files.readString(file)) //  TODO: parse directly from file
-    def json(jsonString: String): Either[String, Value] = jsonString.fromJson[Json].map(fromJson)
+    def json(file: Path): Validator         = json(Files.readString(file)) //  TODO: parse directly from file
+    def json(jsonString: String): Validator = (schema: Schema) =>
+        jsonString
+            .fromJson[Json]
+            .map(fromJson)
+            .flatMap(validateValue(schema))
 
-    def yaml(file: Path): Either[String, Value]         = yaml(Files.readString(file)) //  TODO: parse directly from file
-    def yaml(yamlString: String): Either[String, Value] = Backend.parse[Json](yamlString).left.map(_.getMessage()).map(fromJson(_))
+    def yaml(file: Path): Validator         = yaml(Files.readString(file)) //  TODO: parse directly from file
+    def yaml(yamlString: String): Validator = (schema: Schema) => Backend.parse[Json](yamlString).left.map(_.getMessage()).map(fromJson(_)).flatMap(validateValue(schema))
 
-    def xml(file: Path): Either[String, Value]        = xml(Files.readString(file)) //  TODO: parse directly from file
-    def xml(xmlString: String): Either[String, Value] = Try(xmlToValue(XML.loadString(xmlString))) match
-        case Success(value)     => Right(value)
-        case Failure(exception) => Left(exception.getMessage())
+    def xml(file: Path): Validator        = xml(Files.readString(file)) //  TODO: parse directly from file
+    def xml(xmlString: String): Validator = (schema: Schema) =>
+        Try(xmlToValue(XML.loadString(xmlString))) match
+            case Success(value)     => Right(value)
+            case Failure(exception) => Left(exception.getMessage()).flatMap(validateValue(schema))
 
     // def csv(file: Path): Either[String, Value]        = csv(Files.readString(file)) //  TODO: parse directly from file
     // def csv(csvString: String): Either[String, Value] =
@@ -38,8 +43,10 @@ object DataParsers:
     //     val result = ListOfValues(values.map())
     //     Left("Not implemented yet")
 
-    def text(file: Path): Either[String, Value]   = text(Files.readString(file))
-    def text(text: String): Either[String, Value] = Right(rengbis.Value.TextValue(text))
+    def text(file: Path): Validator   = text(Files.readString(file))
+    def text(text: String): Validator = (schema: Schema) => Right(rengbis.Value.TextValue(text)).flatMap(validateValue(schema))
+
+    protected def validateValue(schema: Schema)(value: Value): Either[String, Value] = Validator.validateValue(schema, value).toEither.map(_ => value)
 
     private def fromJson(json: Json): Value = json match
         case Bool(value)   => Value.BooleanValue(value)

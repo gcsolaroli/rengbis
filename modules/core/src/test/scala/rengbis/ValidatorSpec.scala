@@ -6,10 +6,12 @@ import zio.Chunk
 import rengbis.Validator.ValidationResult
 
 object ValidatorSpec extends ZIOSpecDefault:
-    val validateYamlString: (Schema.Schema, String) => ValidationResult = Validator.validate(DataParsers.yaml)
-    val validateJsonString: (Schema.Schema, String) => ValidationResult = Validator.validate(DataParsers.json)
-    val validateXmlString: (Schema.Schema, String) => ValidationResult  = Validator.validate(DataParsers.xml)
-    val validateString: (Schema.Schema, String) => ValidationResult     = Validator.validate(DataParsers.text)
+    def stringValidator(parser: DataParsers.Parser[String])(schema: Schema.Schema, value: String): ValidationResult = Validator.validate(parser(value))(schema)
+
+    val validateYamlString: (Schema.Schema, String) => ValidationResult = stringValidator(DataParsers.yaml)
+    val validateJsonString: (Schema.Schema, String) => ValidationResult = stringValidator(DataParsers.json)
+    val validateXmlString: (Schema.Schema, String) => ValidationResult  = stringValidator(DataParsers.xml)
+    val validateString: (Schema.Schema, String) => ValidationResult     = stringValidator(DataParsers.text)
 
     def parse(text: String): Either[String, Schema.Schema] = SchemaLoader.parseSchema(text).map(s => s.root.get)
 

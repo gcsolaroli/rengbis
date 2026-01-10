@@ -2,6 +2,7 @@ package rengbis
 
 import java.nio.file.{ Files, Path }
 import zio.Chunk
+import rengbis.Schema.Schema
 
 object SchemaLoader:
 
@@ -33,8 +34,8 @@ object SchemaLoader:
     protected def resolveImports(schemaPath: Path, visited: Set[Path])(schema: ParsedSchema): Either[String, ResolvedSchema] =
         if visited.contains(schemaPath) then return Left(s"Circular import detected: ${ schemaPath }")
 
-        val newVisited: Set[Path]                                     = visited + schemaPath
-        val importResults: Either[String, Map[String, Schema.Schema]] = sequenceEithers(
+        val newVisited: Set[Path]                              = visited + schemaPath
+        val importResults: Either[String, Map[String, Schema]] = sequenceEithers(
             schema.imports.map { (namespace, path) =>
                 val importPath = schemaPath.getParent.resolve(path)
                 for

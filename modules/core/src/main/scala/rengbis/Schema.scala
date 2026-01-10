@@ -122,6 +122,3 @@ class ResolvedSchema(val root: Option[Schema.Schema], val definitions: Map[Strin
     def getRootSchema: Either[String, Schema.Schema] = root match
         case None         => Left("root schema not available")
         case Some(schema) => Right(schema)
-
-class Schema(val schema: Schema.Schema, val references: Map[String, Schema.Schema]):
-    override def toString() = s"Schema: schema: ${ schema }, references: ${ references }"

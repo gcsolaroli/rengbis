@@ -5,13 +5,13 @@ import zio.test.TestResult.allSuccesses
 
 import java.nio.file.{ Files, Path, Paths }
 import scala.jdk.CollectionConverters.IteratorHasAsScala
-import rengbis.Schema.{ AlternativeValues, AnyValue, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, TextValue, TupleValue }
+import rengbis.Schema.{ AlternativeValues, AnyValue, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TupleValue }
 import rengbis.Schema.{ ListConstraint, NumericConstraint, TextConstraint }
 
-def parse(text: String): Either[String, Schema.Schema] = SchemaLoader.parseSchema(text).map(s => s.root.get)
+def parse(text: String): Either[String, Schema] = SchemaLoader.parseSchema(text).map(s => s.root.get)
 
 object SchemaSpec extends ZIOSpecDefault:
-    def parseTest(text: String, expectedValue: Schema.Schema) = test(text) { assertTrue(parse(text) == Right(expectedValue)) }
+    def parseTest(text: String, expectedValue: Schema) = test(text) { assertTrue(parse(text) == Right(expectedValue)) }
 
     def spec = suite("Schema parsing features")(
         parseTest("= any", AnyValue()),
@@ -303,7 +303,7 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                 case (Right(_), true)   => assertTrue(false) ?? "expected to be invalid but parsed successfully"
                 case (Left(err), false) => assertTrue(false) ?? s"expected to be valid but failed: $err"
 
-    def getDataFilesForSchema(schemaDir: Path): List[(Path, Path => Either[String, Value])] =
+    def getDataFilesForSchema(schemaDir: Path): List[(Path, DataParsers.Parser[Path])] =
         val formatDirs = Files
             .list(schemaDir)
             .iterator()
@@ -312,8 +312,8 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
             .toList
 
         formatDirs.flatMap { formatDir =>
-            val formatName                                    = formatDir.getFileName.toString.toLowerCase
-            val parser: Option[Path => Either[String, Value]] = formatName match
+            val formatName                               = formatDir.getFileName.toString.toLowerCase
+            val parser: Option[DataParsers.Parser[Path]] = formatName match
                 case "json" => Some(DataParsers.json)
                 case "yaml" => Some(DataParsers.yaml)
                 case "xml"  => Some(DataParsers.xml)
@@ -331,9 +331,9 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                         .toList
         }
 
-    def dataFileTest(schemaDir: Path, schema: Schema.Schema, dataFile: Path, parser: Path => Either[String, Value]): Spec[Any, Nothing] =
+    def dataFileTest(schemaDir: Path, schema: Schema, dataFile: Path, parser: DataParsers.Parser[Path]): Spec[Any, Nothing] =
         // val content        = Files.readString(dataFile)
-        val result         = Validator.validate(parser)(schema, dataFile)
+        val result         = Validator.validate(parser(dataFile))(schema)
         val expectedToFail = isExpectedToFail(dataFile)
         val formatName     = dataFile.getParent.getFileName.toString
         val relativePath   = s"$formatName/${ dataFile.getFileName }"
