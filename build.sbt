@@ -16,6 +16,8 @@ ThisBuild / scalacOptions ++= Seq(
     "-Wsafe-init"       // experimental (I've seen it cause issues with circe)
 ) ++ Seq("-rewrite", "-indent") ++ Seq("-source", "future")
 
+val RENGBIS_VERSION = "0.0.1"
+
 val zio            = "2.1.24"
 val zio_json       = "0.7.45"
 val zio_parser     = "0.1.11"
@@ -29,7 +31,7 @@ lazy val root = project
     .in(file("."))
     .settings(
         name           := "rengbis-root",
-        version        := "0.0.1-SNAPSHOT",
+        version        := RENGBIS_VERSION,
         publish / skip := true
     )
     .aggregate(core, cli)
@@ -47,7 +49,7 @@ lazy val core = project
     .in(file("modules/core"))
     .settings(
         name    := "rengbis-core",
-        version := "0.0.1-SNAPSHOT"
+        version := RENGBIS_VERSION
     )
     .settings(coreDependencies)
     .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
@@ -64,10 +66,23 @@ lazy val core = project
 lazy val cli = project
     .in(file("modules/cli"))
     .dependsOn(core)
-    .enablePlugins(NativeImagePlugin)
+    .enablePlugins(NativeImagePlugin, BuildInfoPlugin)
     .settings(
         name    := "rengbis-cli",
-        version := "0.0.1-SNAPSHOT"
+        version := RENGBIS_VERSION
+    )
+    .settings(
+        buildInfoKeys    := Seq[BuildInfoKey](
+            name,
+            version,
+            BuildInfoKey.action("gitCommit") {
+                scala.util.Try("git rev-parse --short HEAD".!!.trim).getOrElse("unknown")
+            },
+            BuildInfoKey.action("gitDirty") {
+                scala.util.Try("git status --porcelain".!!.trim.nonEmpty).getOrElse(false)
+            }
+        ),
+        buildInfoPackage := "rengbis.cli"
     )
     .settings(cliDependencies)
     .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
