@@ -1,29 +1,31 @@
 # ReNGBis
 
-this is a "technology preview" (meaning that it is still just a rough experiment) of a possible schema language for validating payloads.
+This is a "technology preview" (meaning that it is still just a rough experiment) of a possible schema language for defining and validating payloads.
 
 It is a **content** schema definition, that allows to specify the expected content of a payload.
-It's not focused on specific formats, and thus it is not able to validate the use of any specific serialization option (eg. using attributes instead of elements in an `xml` document).
+It's not focused on specific formats, and thus it is not able to validate the use of any specific serialization option (eg. using attributes instead of elements in an `XML` document).
 
 The aim of this project is mostly to collect feedback, in order to decide how to push it forward (or just drop it altogether if a better alternative is found).
 
-Thanks to [Tim Bray](https://www.tbray.org/ongoing/misc/Tim) for [suggesting](https://cosocial.ca/@timbray/114574799312311970) the name for the project!
+Thanks to [Tim Bray](https://www.tbray.org/ongoing/misc/Tim) for [suggesting](https://cosocial.ca/@timbray/114574799312311970) the name!
+If it wasn't for Tim, this project may have been called **YADD** (Yet Another Data Definition), as a tribute to [YACC](https://en.wikipedia.org/wiki/Yacc); or the mostly *boring* (and definitely not distinguishable enough) **Relaxed Schema**.
 
-## Why creating another data validator
-Most schema definition languages are pretty tedious to use; the only "enjoyable" schema language I have met is the compact syntax of [RELAX NG](https://en.wikipedia.org/wiki/RELAX_NG); its project and tools are pretty stale (they were last updated in the early 2000), but they still work wonders for processing XML files.
-RELAX NG affordance in defining a schema beates XSD hands down.
+## Why (yet) another data definition language
+Most schema definition languages available today are pretty tedious to use; the only "enjoyable" option we are aware of is [RELAX NG](https://en.wikipedia.org/wiki/RELAX_NG), when using its [compact syntax](https://books.xmlschemata.org/relaxng/relax-CHP-4-SECT-2.html); this project and its tools are pretty stale (they were last updated in the early 2000), but they still work wonders for processing XML files, and their affordance in defining an XML schema beats XSD hands down.
 
-This project is an experiment to try to replicate the convenience and affordance of RELAX NG schema definition, but getting rid of the tight binding with XML and making it suitable to validate payloads of multiple serialization formats.
+ReNGBis is an experiment to try to replicate the convenience and affordance of RELAX NG, while making it suitable to validate payloads of multiple serialization formats, not just XML.
 
 ## How does it compare to alternative options
-The closest alternative I have spotted so far is [CUE](https://cuelang.org/), even though I discoverd it only after having already started this project. I will have to investigate the CUE project further to understand if this is just an half baked duplicated effort, or there are some differences that may justify the effort to push this project forward.
+The closest alternative we are aware of is [CUE](https://cuelang.org/), even though we discovered it only after having already started working on this project. The aims of both projects are similar, but with very different approaches; we like ReNGBis affordance better, though.
 
-I personally don't like working neither with XSD nor JSON-Schema; their choice of defining a schema using the same structure and syntax used for serializing the data itself is a self imposed constraint that provides very little value.
+ReNGBis does not even try to leverage any of the data serialization format it handles to define its schemas; ReNGBis syntax has been defined from scratch just to be as effective as possible in the definitions of the structures of the data it has to validate.
 
 # Examples
-Here are some examples of a `rengbis` definitions taken from the [tests](./src/test/scala/rengbis/ValidatorSpec.scala).
+Here are some examples of ReNGBis definitions; more examples are available in the test [resources](./modules/core/src/test/resources/schemas/).
 
 ## Simple structure
+Here's a simple schema that should be pretty straightforward to understand; it's a structure with three fields: `name`, `age`, and `hobbies`, respectively of type `text`, `number`, and *list* of `text` (`text*`)
+
 #### Rengbis schema
 ```rengbis
 = {
@@ -33,7 +35,7 @@ Here are some examples of a `rengbis` definitions taken from the [tests](./src/t
 }
 ```
 
-The above schema would validate the following documents:
+The above schema can validate the following payloads
 #### JSON
 ```json
 {
@@ -52,7 +54,6 @@ hobbies:
   - hiking
 ```
 
-
 #### XML
 ```xml
 <root>
@@ -67,65 +68,58 @@ hobbies:
 The current implementation is written in `scala 3`, using [`ZIO`](https://zio.dev) and its [`parser` library](https://zio.dev/zio-parser/)
 
 ## Supported formats
-The current implementation provides helpers to validate `xml`, `json`, and `yaml` documents. Adding support for more formats should be pretty easy, especially if other libraries are already available to desirialize the payload.
+The current implementation provides helpers to validate `xml`, `json`, `yaml`, and `csv` documents. Adding support for more formats should be pretty easy, especially if other libraries are already available to deserialize the payload.
 
-The current implementation encodes all the values using the `rengbis.Value` class before validating their content.
+The current validation procedure is implemented on a generic `rengbis.Value` data; the different formats are first read and encoded in values of this class, before actually being validated.
 
 # Schema features
-Here is a brief run down of the currently supported features
+Here is a brief run down of the currently supported features:
+- [Types](#types)
+- [Constraints](#constraints)
+- [Comments](#comments)
+- [Import](#import)
 
-## Basic value types and Alternative options
+## Types
+
+### Basic type values
+ReNGBis supports four basic types, `text`, `number`, `boolean`, and `any`.
+The code below defines a type that may be either a `text`, a `number`, a `boolean`, or just `any` value.
+This is just a dull example to list all the basic types, as it wouldn't make much sense to define a type like this, as it would match anything anyway.
+Besides the basic value types, it also shows the way to define alternative options (`|`) for a given value.
+
 ```rengbis
 = text | number | boolean | any
 ```
-This schema defines a value that may be a `text`, a `number`, a `boolean`, or just `any` value.
-Besides the basic value types, it also shows the way to define alternative options (`|`) for a given value.
 
-## Basic structure (aka "dictionary")
+Basic values on their own would be pretty boring; but there are enough options to combine them together and keep it interesting (hopefully!).
+
+### Structured objects
+Structured objects (also known as *dictionary* or *maps* allow to combine multiple values, giving a unique name each.
+In the example below, it's defined a value that contains a `title` (of type `text`), **may** (`?`) contains the number of  `pages` (of type `number`, obviously), and also the `available` information (encoded as a `boolean` value).
+Commas are used to separate the different options, but are only required when listing multiple items on the same line; when separating definitions in new lines, the comma is optional.
 ```rengbis
 = {
-    name: text
-    age?: number
-    hobbies: text*
+    title: text
+    pages?: number
+    available: boolean
 }
 ```
-This schema defines a dictionaly value that **should** contain a `name` (of type `text`), **may** (`?`) contain an `age` (of type `number`), and **should** contain some `hobbies` (list, possibly empty – `*`, of `text`).
-The comma to separate the different keys is required only when listing multiple values on the same line; when separating values in new lines, separatinig commas are optional.
 
-### Objects with uncostraint keys
+#### … also with unconstrained keys
 It's also possible to define structures with *free* keys; in order to express this constraint, just use the `…` (or `...`) value for the key:
 ```rengbis
 service = { name: text, port?: number }
 = {
-    name: text,
+    name: text
     services: { …: service }
 }
 ```
 
-## Named structures
+### Constant values
+It is also possible to define values that can only assume specific constant values. This schema defines a value that could only have either the text `"Of course"` or the text `"No way"` as values.
 ```rengbis
-foo = {
-    foo_1: number,
-    foo_2: text
-}
-
-bar = {
-    bar_A: text*,
-    bar_b: number*
-}
-
-= {
-    key_1: foo,
-    key_2: bar
-}
+= "Of course" | "No way"
 ```
-This schema defines two **named structures** (`foo` and `bar`) that are used to define other structures.
-
-## Constant values
-```rengbis
-= "yes" | "no"
-```
-This schema defines a value that could only have either the text `yes` or the text `no` as values.
 
 ## Tuple values
 ```rengbis
@@ -134,10 +128,41 @@ This schema defines a value that could only have either the text `yes` or the te
 This schema defines a value that should contain three values, the first two of type `text`, and the last of type `number`.
 Tuple values are not useful for *regular* documents (`yaml`, `json`, `xml`, …), but may be quite handy in describing tabular data (eg `csv` files) when columns do not have an explicit name.
 
+## Any values
+As much a we like to make everything well defined, from time to time you need to let the schema a little loose; in these cases you can use the `any` type.
+For example, if we want to specify that a structure is just a map where values may be anything, just use the following definition
+```rengbis
+= { …: any }
+```
 
-## Text constraints
+### Named structures
+It's possible to give **names** to any value; this allows to reference it else where to both avoid repetitions and making relationships more clear.
+```rengbis
+foo = { foo_1: number, foo_2: text }
+bar = { bar_A: text*, bar_B: number* }
 
-### Size
+= { key_1: foo, key_2: bar }
+```
+
+### Recursive definitions
+It's also possible to use recursive definitions:
+```rengbis
+Expression = Value | Operation
+Value = number
+Operation = {
+    operator: "+" | "-" | "*" | "/"
+    firstOperand: Value
+    secondOperand: Expression
+}
+
+= Expression
+```
+
+## Constraints
+
+### Text constraints
+
+#### Size
 It is possible to constraint the size of the text.
 ```rengbis
 exactSize = text [ length == 10 ]
@@ -148,14 +173,14 @@ exactSize = text [ length == 10 ]
 = exactSize | short | long | inBetween
 ```
 
-### Regular expressions
+#### Regular expressions
 ```rengbis
 = text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 ]
 ```
 Text values may be constraint with either a `regex` or a `length`.
 This would match an ISO8060 date value, like `2025-12-27`.
 
-### Pattern
+#### Pattern
 It's also possible to use COBOL like 'picture clause' in order to express easier to read formats.
 
 ```rengbis
@@ -170,9 +195,9 @@ The current implementation handles these format specifiers:
 - `*`: any character
 - any other character is parsed unchanged
 
-## List constraints
+### List constraints
 
-### Number of items
+#### Number of items
 
 ```rengbis
 = {
@@ -184,7 +209,7 @@ The current implementation handles these format specifiers:
 ```
 List values may be constrainted in the number of items they contain.
 
-### Uniqueness
+#### Uniqueness
 It is also possible to define some uniqueness criteria for values in a given list.
 
 ```rengbis
@@ -211,7 +236,7 @@ At the moment there are a few limits on how this constraints may be defined:
 - uniqueness can only be defined on basic values (text, number, boolean) or combination of such basic values
 - only direct elements of the object where uniqueness constraints are defined may be referenced
 
-## Number costraints
+### Number constraints
 Number definitions support two kind of constraints: *type* and *range*.
 For the *type*, there is currently just one option that can be specified, and that is 'integer'.
 ```rengbis
@@ -254,11 +279,11 @@ types => import ./types.rengbis
 The `root` element of the imported schema definition may also be used, just referring to the *scope* name.
 
 # Status of the project
-This is a very early prototype, shared only to get some feedback; besides the few test included in the code base, it has not be used anywhere else.
+This is a very early prototype, shared only to get some feedback; besides the few tests included in the code base, it has not been used anywhere else.
 
 ## Future enhancements
-Before venturing in this experiment, I did many tries with [`zio-schema`](https://github.com/zio/zio-schema); unfortunately I was not able to find a way to use that library to achieve my goals.
-[Lately](https://x.com/jdegoes/status/1919380595597090856) a [new version](https://github.com/zio/zio-blocks) of `zio-schema` has been announced; I haven't had the time to play with it yet, but the idea of using `rengbis` as a language to define `zio-schema` values that could be later leveraged to validate/parse actual payloads, getting rid of the custom  machinary I had to build myself seems an interesting option to validate.
+Before venturing into this experiment, we tried working with [`zio-schema`](https://github.com/zio/zio-schema); unfortunately we were not able to find a way to use that library to achieve our goals.
+[Lately](https://x.com/jdegoes/status/1919380595597090856) a [new version](https://github.com/zio/zio-blocks) of `zio-schema` has been announced; we haven't had the time to explore it yet, but the idea of using `rengbis` as a language to define `zio-schema` values that could be later leveraged to validate/parse actual payloads, getting rid of the custom machinery we had to build, seems an interesting option to explore.
 
 
 ## Project Structure
@@ -326,4 +351,4 @@ rengbis validate-schema schema1.rengbis schema2.rengbis
 rengbis validate-data --format json --schema schema.rengbis data1.json data2.json
 ```
 
-Supported formats: `json`, `yaml`, `xml`
+Supported formats: `json`, `yaml`, `xml`, `csv`

@@ -262,6 +262,7 @@ object SchemaSyntax:
         <> mapValue.widen[Schema]
         <> objectValue.widen[Schema]
         <> (Syntax.char('(') ~ whitespaces ~> alternativeValues <~ whitespaces ~ Syntax.char(')')).widen[Schema]
+        <> tupleValues.widen[Schema]
         <> scopedReference.widen[Schema]
         <> namedValueReference.widen[Schema]
 

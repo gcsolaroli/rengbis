@@ -1,0 +1,4 @@
+= {
+    text_values: "Of course" | "Hell no!"
+    number_values: "42" | "666"
+}

@@ -317,6 +317,7 @@ object SchemaSamplesSpec extends ZIOSpecDefault:
                 case "json" => Some(DataParsers.json)
                 case "yaml" => Some(DataParsers.yaml)
                 case "xml"  => Some(DataParsers.xml)
+                case "csv"  => Some(DataParsers.csv)
                 case _      => None
 
             parser match

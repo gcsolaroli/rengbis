@@ -5,6 +5,7 @@ import zio.Chunk
 import zio.json.ast.Json
 import zio.json.ast.Json.{ Arr, Bool, Num, Obj, Str }
 import zio.json.DecoderOps
+import com.github.tototoshi.csv.CSVReader
 
 import dev.hnaderi.yaml4s.ziojson.ZioJsonWriter
 import dev.hnaderi.yaml4s.Backend
@@ -35,13 +36,29 @@ object DataParsers:
             case Success(value)     => Right(value)
             case Failure(exception) => Left(exception.getMessage()).flatMap(validateValue(schema))
 
-    // def csv(file: Path): Either[String, Value]        = csv(Files.readString(file)) //  TODO: parse directly from file
-    // def csv(csvString: String): Either[String, Value] =
-    //     val reader = CSVReader.open(new StringReader(csvString))
-    //     reader.
-    //     val values = reader.all()
-    //     val result = ListOfValues(values.map())
-    //     Left("Not implemented yet")
+    def csv(file: Path): Validator        = csv(CSVReader.open(file.toFile))
+    def csv(csvString: String): Validator = csv(CSVReader.open(new StringReader(csvString)))
+    def csv(reader: CSVReader): Validator = (schema: Schema) =>
+        schema match
+            case Schema.ListOfValues(Schema.ObjectValue(objSchema), _*) =>
+                val csvRows   = reader.allWithHeaders()
+                val keyNames  = objSchema.keys.map(_.label).toSet
+                val rowValues = csvRows.map { row =>
+                    val filteredRow = row.filter((k, _) => keyNames.contains(k))
+                    Value.ObjectWithValues(filteredRow.map((k, v) => (k, Value.TextValue(v))))
+                }
+                Right(Value.ListOfValues(Chunk.fromIterable(rowValues))).flatMap(validateValue(schema))
+
+            case Schema.ListOfValues(Schema.TupleValue(tupleSchemas*), _*) =>
+                val csvRows   = reader.all()
+                val rowValues = csvRows.map { row =>
+                    val tupleValues = row.take(tupleSchemas.size).map(Value.TextValue(_))
+                    Value.TupleOfValues(Chunk.fromIterable(tupleValues))
+                }
+                Right(Value.ListOfValues(Chunk.fromIterable(rowValues))).flatMap(validateValue(schema))
+
+            case _ =>
+                Left("Schema not compatible with CSV data: root element must be a ListOfValues containing ObjectValue or TupleValue")
 
     def text(file: Path): Validator   = text(Files.readString(file))
     def text(text: String): Validator = (schema: Schema) => Right(rengbis.Value.TextValue(text)).flatMap(validateValue(schema))

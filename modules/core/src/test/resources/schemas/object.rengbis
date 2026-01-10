@@ -1,0 +1,5 @@
+= {
+    name: text
+    age: number
+    hobbies: text*
+}
