@@ -2,8 +2,8 @@ package rengbis
 
 import zio.Chunk
 import zio.parser.{ AnySyntaxOps, Parser, ParserOps, Printer, StringErrSyntaxOps, StringParserError, Syntax, SyntaxOps }
-import Schema.{ AlternativeValues, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue }
-import Schema.{ GivenTextValue, ListConstraint, NumericConstraint, TextConstraint }
+import Schema.{ AlternativeValues, BinaryValue, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue }
+import Schema.{ BinaryConstraint, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint }
 
 object SchemaSyntax:
     type SchemaSyntax[A] = zio.parser.Syntax[String, Char, Char, A]
@@ -190,6 +190,85 @@ object SchemaSyntax:
         numericValue => if numericValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(numericValue.constraints)))
     )
 
+    val binaryToTextEncoder: SchemaSyntax[BinaryConstraint.BinaryToTextEncoder] =
+        Syntax.string("'hex'", BinaryConstraint.BinaryToTextEncoder.hex)
+        <> Syntax.string("'base64'", BinaryConstraint.BinaryToTextEncoder.base64)
+        <> Syntax.string("'base32'", BinaryConstraint.BinaryToTextEncoder.base32)
+        <> Syntax.string("'base58'", BinaryConstraint.BinaryToTextEncoder.base58)
+        <> Syntax.string("'ascii85'", BinaryConstraint.BinaryToTextEncoder.ascii85)
+
+    val encodingConstraint: SchemaSyntax[BinaryConstraint.Constraint] = (
+        Syntax.string("encoding", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> binaryToTextEncoder
+    ).transform(
+        encoder => BinaryConstraint.Encoding(encoder),
+        c => c.encoder
+    ).widen[BinaryConstraint.Constraint]
+
+    val sizeBinaryUnit: SchemaSyntax[BinaryConstraint.BinaryUnit] =
+        Syntax.string("bits", BinaryConstraint.BinaryUnit.bytes)
+            <> Syntax.string("bytes", BinaryConstraint.BinaryUnit.bytes)
+            <> Syntax.string("KB", BinaryConstraint.BinaryUnit.KB)
+            <> Syntax.string("MB", BinaryConstraint.BinaryUnit.MB)
+            <> Syntax.string("GB", BinaryConstraint.BinaryUnit.GB)
+
+    val sizeBinaryConstraints: SchemaSyntax[Chunk[BinaryConstraint.SizeConstraint]] = (
+        sizeBinaryUnit ~ whitespaces ~ sizeConstraint ~ whitespaces ~ number
+    ).transform(
+        (u, c, n) =>
+            Chunk(
+                c match
+                    case ExtendedSizeConstraint.EQ => BinaryConstraint.ExactSize(n, u)
+                    case ExtendedSizeConstraint.GT => BinaryConstraint.MinSize(n + 1, u)
+                    case ExtendedSizeConstraint.GE => BinaryConstraint.MinSize(n, u)
+                    case SmallerSizeConstraint.LT  => BinaryConstraint.MaxSize(n - 1, u)
+                    case SmallerSizeConstraint.LE  => BinaryConstraint.MaxSize(n, u)
+            ),
+        c =>
+            c.head match
+                case BinaryConstraint.ExactSize(s, u) => (u, ExtendedSizeConstraint.EQ, s)
+                case BinaryConstraint.MinSize(s, u)   => (u, ExtendedSizeConstraint.GE, s)
+                case BinaryConstraint.MaxSize(s, u)   => (u, SmallerSizeConstraint.LE, s)
+    )
+        <> (
+            number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ sizeBinaryUnit ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ number
+        ).transform(
+            (lo, lc, unit, uc, up) =>
+                (lc, uc) match
+                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LT) => Chunk(BinaryConstraint.MinSize(lo + 1, unit), BinaryConstraint.MaxSize(up - 1, unit))
+                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LE) => Chunk(BinaryConstraint.MinSize(lo + 1, unit), BinaryConstraint.MaxSize(up, unit))
+                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LT) => Chunk(BinaryConstraint.MinSize(lo, unit), BinaryConstraint.MaxSize(up - 1, unit))
+                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LE) => Chunk(BinaryConstraint.MinSize(lo, unit), BinaryConstraint.MaxSize(up, unit))
+            ,
+            c =>
+                val minSize = c.collectFirst { case BinaryConstraint.MinSize(s, u) => s }.getOrElse(0)
+                val maxSize = c.collectFirst { case BinaryConstraint.MaxSize(s, u) => s }.getOrElse(0)
+                val unit = c.collectFirst { case BinaryConstraint.MaxSize(s, u) => u }.getOrElse(BinaryConstraint.BinaryUnit.bytes)
+                (minSize, SmallerSizeConstraint.LE, unit, SmallerSizeConstraint.LE, maxSize)
+        )
+        <> (
+            number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ sizeBinaryUnit
+        ).transform(
+            (l, lc, unit) =>
+                lc match
+                    case SmallerSizeConstraint.LT => Chunk(BinaryConstraint.MinSize(l + 1, unit))
+                    case SmallerSizeConstraint.LE => Chunk(BinaryConstraint.MinSize(l, unit))
+            ,
+            c =>
+                val (minSize, unit) = c.collectFirst { case BinaryConstraint.MinSize(s, u) => (s, u) }.getOrElse((0, BinaryConstraint.BinaryUnit.bytes))
+                (minSize, SmallerSizeConstraint.LE, unit)
+        )
+
+    val binaryConstraints: SchemaSyntax[Chunk[BinaryConstraint.Constraint]] =
+        sizeBinaryConstraints.widen[Chunk[BinaryConstraint.Constraint]]
+            <> encodingConstraint.+
+
+    val binaryValue: SchemaSyntax[Schema.BinaryValue] = (
+        Syntax.string("binary", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> binaryConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
+    ).transform(
+        constraints => BinaryValue(constraints.map(_.flatMap(identity)).getOrElse(Chunk()).toList*),
+        binaryValue => if binaryValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(binaryValue.constraints)))
+    )
+
     val label: SchemaSyntax[String] = (Syntax.letter ~ (Syntax.alphaNumeric <> Syntax.charIn("_-")).repeat0).string
 
     val madatoryLabel: SchemaSyntax[ObjectLabel] = label.transform(
@@ -257,6 +336,7 @@ object SchemaSyntax:
     val item: SchemaSyntax[Schema] = anyValue.widen[Schema]
         <> booleanValue.widen[Schema]
         <> numericValue.widen[Schema]
+        <> binaryValue.widen[Schema]
         <> textValue.widen[Schema]
         <> givenTextValue.widen[Schema]
         <> mapValue.widen[Schema]

@@ -82,13 +82,13 @@ Here is a brief run down of the currently supported features:
 ## Types
 
 ### Basic type values
-ReNGBis supports four basic types, `text`, `number`, `boolean`, and `any`.
-The code below defines a type that may be either a `text`, a `number`, a `boolean`, or just `any` value.
+ReNGBis supports four basic types, `text`, `number`, `boolean`, `binary`, and `any`.
+The code below defines a type that may be either a `text`, a `number`, a `boolean`, `binary`, or just `any` value.
 This is just a dull example to list all the basic types, as it wouldn't make much sense to define a type like this, as it would match anything anyway.
 Besides the basic value types, it also shows the way to define alternative options (`|`) for a given value.
 
 ```rengbis
-= text | number | boolean | any
+= text | number | boolean | binary | any
 ```
 
 Basic values on their own would be pretty boring; but there are enough options to combine them together and keep it interesting (hopefully!).
@@ -195,6 +195,34 @@ The current implementation handles these format specifiers:
 - `*`: any character
 - any other character is parsed unchanged
 
+### Number constraints
+Number definitions support two kind of constraints: *type* and *range*.
+For the *type*, there is currently just one option that can be specified, and that is 'integer'.
+```rengbis
+= number [ integer ]
+```
+
+This defines that the value must be integer, with no decimals digits.
+
+To specify the *range* of legit values, the syntax mimics the one used to specify the `length` of `text` values:
+```rengbis
+positiveValue = number [ value > 0 ]
+positiveInteger = number [ integer, value > 0 ]
+
+reservedPortNumber = number [ integer, 0 <= value < 1024 ]
+registeredPortNumber = number [ integer, 1024 <= value < 49152 ]
+ephemeralPortNumber = number [ integer, 49152 <= value <= 65535 ]
+```
+
+### Binary constraints
+In text based serialisation formats, binary values are most often just text values [encoding](https://en.wikipedia.org/wiki/Binary-to-text_encoding) binary values.
+
+So `binary` values can have an `encoding` option (with the following supported values: `base64`, `base32`, `base58`, `ascii85`, `hex`).
+And also a *size* constraint, expressed either in `bytes`, `KB`, `MB`, or `GB`.
+```rengbis
+= binary [ encoding = 'base64', bytes == 32 ]
+```
+
 ### List constraints
 
 #### Number of items
@@ -235,25 +263,6 @@ structure = {
 At the moment there are a few limits on how this constraints may be defined:
 - uniqueness can only be defined on basic values (text, number, boolean) or combination of such basic values
 - only direct elements of the object where uniqueness constraints are defined may be referenced
-
-### Number constraints
-Number definitions support two kind of constraints: *type* and *range*.
-For the *type*, there is currently just one option that can be specified, and that is 'integer'.
-```rengbis
-= number [ integer ]
-```
-
-This defines that the value must be integer, with no decimals digits.
-
-To specify the *range* of legit values, the syntax mimics the one used to specify the `length` of `text` values:
-```rengbis
-positiveValue = number [ value > 0 ]
-positiveInteger = number [ integer, value > 0 ]
-
-reservedPortNumber = number [ integer, 0 <= value < 1024 ]
-registeredPortNumber = number [ integer, 1024 <= value < 49152 ]
-ephemeralPortNumber = number [ integer, 49152 <= value <= 65535 ]
-```
 
 ## Comments
 Anything after a `#` character, up to the end of the line, is ignored by the parser and thus treated as a comment.

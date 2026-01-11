@@ -5,8 +5,8 @@ import zio.test.TestResult.allSuccesses
 
 import java.nio.file.{ Files, Path, Paths }
 import scala.jdk.CollectionConverters.IteratorHasAsScala
-import rengbis.Schema.{ AlternativeValues, AnyValue, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TupleValue }
-import rengbis.Schema.{ ListConstraint, NumericConstraint, TextConstraint }
+import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TupleValue }
+import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint }
 
 def parse(text: String): Either[String, Schema] = SchemaLoader.parseSchema(text).map(s => s.root.get)
 
@@ -24,6 +24,7 @@ object SchemaSpec extends ZIOSpecDefault:
         parseTest("= text* | number", AlternativeValues(ListOfValues(TextValue()), NumericValue())),
         parseTest("= (text | number)*", ListOfValues(AlternativeValues(TextValue(), NumericValue()))),
         parseTest("""= "yes" | "no" """, EnumValues("yes", "no")),
+        //
         parseTest("""= text [ length == 10 ]""", TextValue(TextConstraint.Length(10))),
         parseTest("""= text [ 10 <= length <= 100 ]""", TextValue(TextConstraint.MinLength(10), TextConstraint.MaxLength(100))),
         parseTest("""= text [ 10 < length < 100 ]""", TextValue(TextConstraint.MinLength(11), TextConstraint.MaxLength(99))),
@@ -35,6 +36,7 @@ object SchemaSpec extends ZIOSpecDefault:
         parseTest("""= text [ length > 10 ]""", TextValue(TextConstraint.MinLength(11))),
         parseTest("""= text [ length <= 100 ]""", TextValue(TextConstraint.MaxLength(100))),
         parseTest("""= text [ length < 100 ]""", TextValue(TextConstraint.MaxLength(99))),
+        //
         parseTest("""= number [ integer ]""", NumericValue(NumericConstraint.Integer)),
         parseTest("""= number [ value >= 0 ]""", NumericValue(NumericConstraint.MinValue(0))),
         parseTest("""= number [ value > 0 ]""", NumericValue(NumericConstraint.MinValueExclusive(0))),
@@ -49,6 +51,20 @@ object SchemaSpec extends ZIOSpecDefault:
         parseTest("""= number [ integer, 1 <= value <= 12 ]""", NumericValue(NumericConstraint.Integer, NumericConstraint.MinValue(1), NumericConstraint.MaxValue(12))),
         parseTest("""= number [ value >= -10 ]""", NumericValue(NumericConstraint.MinValue(-10))),
         parseTest("""= number [ value >= 0.5 ]""", NumericValue(NumericConstraint.MinValue(BigDecimal("0.5")))),
+        //
+        parseTest("= binary", BinaryValue()),
+        parseTest("""= binary [ encoding = 'base64' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64))),
+        parseTest("""= binary [ encoding = 'hex' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex))),
+        parseTest("""= binary [ bytes == 32 ]""", BinaryValue(BinaryConstraint.ExactSize(32, BinaryConstraint.BinaryUnit.bytes))),
+        parseTest("""= binary [ bytes >= 16 ]""", BinaryValue(BinaryConstraint.MinSize(16, BinaryConstraint.BinaryUnit.bytes))),
+        parseTest("""= binary [ bytes <= 256 ]""", BinaryValue(BinaryConstraint.MaxSize(256, BinaryConstraint.BinaryUnit.bytes))),
+        parseTest("""= binary [ 16 <= bytes <= 64 ]""", BinaryValue(BinaryConstraint.MinSize(16, BinaryConstraint.BinaryUnit.bytes), BinaryConstraint.MaxSize(64, BinaryConstraint.BinaryUnit.bytes))),
+        parseTest("""= binary [ encoding = 'base64', bytes == 32 ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64), BinaryConstraint.ExactSize(32, BinaryConstraint.BinaryUnit.bytes))),
+        parseTest(
+            """= binary [ encoding = 'hex', 8 <= bytes <= 64 ]""",
+            BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex), BinaryConstraint.MinSize(8, BinaryConstraint.BinaryUnit.bytes), BinaryConstraint.MaxSize(64, BinaryConstraint.BinaryUnit.bytes))
+        ),
+        //
         parseTest("""= text [ 10 <= length <= 100 ]*""", ListOfValues(TextValue(TextConstraint.MinLength(10), TextConstraint.MaxLength(100)))),
         parseTest("""= text* [ size == 10 ]""", ListOfValues(TextValue(), ListConstraint.ExactSize(10))),
         parseTest(

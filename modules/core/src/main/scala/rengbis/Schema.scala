@@ -41,6 +41,30 @@ object Schema:
         case class MaxValueExclusive(override val bound: BigDecimal)        extends NumericValueConstraint(bound)
         case class ExactValue(override val bound: BigDecimal)               extends NumericValueConstraint(bound)
 
+    object BinaryConstraint:
+        sealed abstract class Constraint
+
+        enum BinaryToTextEncoder(val code: String):
+            case hex extends BinaryToTextEncoder("hex")
+            case base64 extends BinaryToTextEncoder("base64")
+            case base32 extends BinaryToTextEncoder("base32")
+            case base58 extends BinaryToTextEncoder("base58")
+            case ascii85 extends BinaryToTextEncoder("ascii85")
+
+
+        case class Encoding(encoder: BinaryToTextEncoder) extends Constraint
+
+        enum BinaryUnit(val symbol: String, val bytes: Integer):
+            case bytes  extends BinaryUnit("bytes", 1)
+            case KB     extends BinaryUnit("KB", 1024)
+            case MB     extends BinaryUnit("MB", 1024 * 1024)
+            case GB     extends BinaryUnit("GB", 1024 *1024 * 1024)
+
+        sealed abstract class SizeConstraint(val size: Int, val unit: BinaryUnit)   extends Constraint
+        case class MinSize(override val size: Int, override val unit: BinaryUnit)   extends SizeConstraint(size, unit)
+        case class MaxSize(override val size: Int, override val unit: BinaryUnit)   extends SizeConstraint(size, unit)
+        case class ExactSize(override val size: Int, override val unit: BinaryUnit) extends SizeConstraint(size, unit)
+
     // ------------------------------------------------------------------------
 
     sealed abstract class Schema:
@@ -53,6 +77,7 @@ object Schema:
     final case class TextValue(constraints: TextConstraint.Constraint*)       extends Schema
     final case class GivenTextValue(value: String)                            extends Schema
     final case class NumericValue(constraints: NumericConstraint.Constraint*) extends Schema
+    final case class BinaryValue(constraints: BinaryConstraint.Constraint*)   extends Schema
     final case class EnumValues(values: String*)                              extends Schema
 
     final case class ListOfValues(schema: Schema, constraints: ListConstraint.Constraint*) extends Schema:

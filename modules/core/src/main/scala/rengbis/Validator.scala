@@ -3,7 +3,9 @@ package rengbis
 import java.nio.file.Path
 import zio.Chunk
 import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TupleValue }
-import rengbis.Schema.{ ListConstraint, NumericConstraint, TextConstraint }
+import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint }
+import rengbis.Schema.BinaryConstraint.BinaryToTextEncoder
+import rengbis.Schema.BinaryValue as SchemaBinaryValue
 import scala.util.{ Failure, Success, Try }
 
 object Validator:
@@ -137,22 +139,88 @@ object Validator:
         case NumericConstraint.MaxValueExclusive(max) => if value < max then ValidationResult.valid else ValidationResult.reportError(s"maximum value constraint (< ${ max }) not met: ${ value }")
         case NumericConstraint.ExactValue(exact)      => if value == exact then ValidationResult.valid else ValidationResult.reportError(s"exact value constraint (${ exact }) not met: ${ value }")
 
+    def decodeEncoding(encoder: BinaryToTextEncoder, text: String): Either[String, Chunk[Byte]] =
+        Try:
+            encoder match
+                case BinaryToTextEncoder.base64  =>
+                    Chunk.fromArray(java.util.Base64.getDecoder.decode(text))
+                case BinaryToTextEncoder.hex     =>
+                    val cleanHex = text.replaceAll("\\s", "")
+                    if cleanHex.length % 2 != 0 then throw new IllegalArgumentException("Hex string must have even length")
+                    Chunk.fromArray(cleanHex.grouped(2).map(Integer.parseInt(_, 16).toByte).toArray)
+                case BinaryToTextEncoder.base32  =>
+                    val alphabet   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+                    val cleanInput = text.toUpperCase.replaceAll("\\s", "").replaceAll("=", "")
+                    val bits       = cleanInput.flatMap { c =>
+                        val idx = alphabet.indexOf(c)
+                        if idx < 0 then throw new IllegalArgumentException(s"Invalid base32 character: $c")
+                        (4 to 0 by -1).map(i => (idx >> i) & 1)
+                    }
+                    Chunk.fromArray(bits.grouped(8).filter(_.length == 8).map(_.foldLeft(0)((acc, b) => (acc << 1) | b).toByte).toArray)
+                case BinaryToTextEncoder.base58  =>
+                    val alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+                    var num      = BigInt(0)
+                    for c <- text do
+                        val idx = alphabet.indexOf(c)
+                        if idx < 0 then throw new IllegalArgumentException(s"Invalid base58 character: $c")
+                        num = num * 58 + idx
+                    val bytes    = num.toByteArray
+                    val result = if bytes.length > 1 && bytes(0) == 0 then bytes.tail else bytes
+                    Chunk.fromArray(result)
+                case BinaryToTextEncoder.ascii85 =>
+                    val cleanInput = text.replaceAll("\\s", "")
+                    val input      =
+                        if cleanInput.startsWith("<~") && cleanInput.endsWith("~>")
+                        then cleanInput.drop(2).dropRight(2)
+                        else cleanInput
+                    val result     = scala.collection.mutable.ArrayBuffer[Byte]()
+                    var i          = 0
+                    while i < input.length do
+                        if input(i) == 'z' then
+                            result ++= Array[Byte](0, 0, 0, 0)
+                            i += 1
+                        else
+                            val chunk       = input.slice(i, i + 5).padTo(5, 'u')
+                            var value       = 0L
+                            for c <- chunk do
+                                if c < '!' || c > 'u' then throw new IllegalArgumentException(s"Invalid ascii85 character: $c")
+                                value = value * 85 + (c - '!')
+                            val bytesToTake = Math.min(4, input.length - i - 1).max(1)
+                            val bytes       = (0 until 4).map(j => ((value >> (24 - 8 * j)) & 0xff).toByte).toArray
+                            result ++= bytes.take(bytesToTake)
+                            i += Math.min(5, input.length - i)
+                    Chunk.fromArray(result.toArray)
+        match
+            case Success(bytes) => Right(bytes)
+            case Failure(e)     => Left(e.getMessage)
+
+    def validateBinarySizeConstraint(constraint: BinaryConstraint.SizeConstraint, data: Chunk[Byte]): ValidationResult =
+        val byteSize = data.length
+        constraint match
+            case BinaryConstraint.MinSize(minSize, unit)     => if byteSize >= (minSize * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary minimum size constraint (${ minSize } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
+            case BinaryConstraint.MaxSize(maxSize, unit)     => if byteSize <= (maxSize * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary maximum size constraint (${ maxSize } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
+            case BinaryConstraint.ExactSize(exactSize, unit) => if byteSize == (exactSize * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary exact size constraint (${ exactSize } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
+
+    def validateBinaryConstraints(constraints: Seq[BinaryConstraint.Constraint], data: Chunk[Byte]): ValidationResult =
+        val sizeConstraints = constraints.collect { case c: BinaryConstraint.SizeConstraint => c }
+        ValidationResult.summarize(sizeConstraints.map(c => validateBinarySizeConstraint(c, data)))
+
     def validateValue(schema: Schema, value: Value): ValidationResult = schema match
-        case Fail()                        => ValidationResult.reportError(s"fail value")
-        case AnyValue()                    => ValidationResult.valid
-        case BooleanValue()                =>
+        case Fail()                          => ValidationResult.reportError(s"fail value")
+        case AnyValue()                      => ValidationResult.valid
+        case BooleanValue()                  =>
             value match
                 case Value.BooleanValue(value) => ValidationResult.valid
                 case _                         => ValidationResult.reportError(s"expected boolean value; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case TextValue(constraints*)       =>
+        case TextValue(constraints*)         =>
             value match
                 case Value.TextValue(text) => ValidationResult.summarize(constraints.map(c => validateTextConstraints(c, text)))
                 case _                     => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case GivenTextValue(givenValue)    =>
+        case GivenTextValue(givenValue)      =>
             value match
                 case Value.TextValue(value) => if (value == givenValue) then ValidationResult.valid else ValidationResult.reportError(s"expected value '${ givenValue }', found '${ value }'")
                 case _                      => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case NumericValue(constraints*)    =>
+        case NumericValue(constraints*)      =>
             value match
                 case Value.NumberValue(numValue) => ValidationResult.summarize(constraints.map(c => validateNumericConstraints(c, numValue)))
                 case Value.TextValue(textValue)  =>
@@ -160,11 +228,25 @@ object Validator:
                         case Success(numValue) => ValidationResult.summarize(constraints.map(c => validateNumericConstraints(c, numValue)))
                         case Failure(e)        => ValidationResult.reportError(e.getMessage())
                 case _                           => ValidationResult.reportError(s"expected numeric value; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case EnumValues(values*)           =>
+        case SchemaBinaryValue(constraints*) =>
+            value match
+                case Value.BinaryValue(data) =>
+                    // Direct binary data - validate size constraints
+                    validateBinaryConstraints(constraints, data)
+                case Value.TextValue(text)   =>
+                    constraints.collectFirst { case BinaryConstraint.Encoding(enc) => enc } match
+                        case Some(encoding) =>
+                            decodeEncoding(encoding, text) match
+                                case Right(bytes) => validateBinaryConstraints(constraints, bytes)
+                                case Left(error)  => ValidationResult.reportError(s"Failed to decode $encoding: $error")
+                        case None           =>
+                            ValidationResult.valid
+                case _                       => ValidationResult.reportError(s"expected binary value; ${ value.valueTypeDescription } found [value: ${ value }]")
+        case EnumValues(values*)             =>
             value match
                 case Value.TextValue(value) => if (values.contains(value)) then ValidationResult.valid else ValidationResult.reportError(s"enum type does not include provided value: '${ value }'")
                 case _                      => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case ListOfValues(s, constraints*) =>
+        case ListOfValues(s, constraints*)   =>
             value match
                 case Value.ListOfValues(values) =>
                     ValidationResult.summarize(
@@ -172,17 +254,17 @@ object Validator:
                             values.map(v => validateValue(s, v))
                     )
                 case value                      => ValidationResult.reportError(s"expected list of values; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case TupleValue(options*)          =>
+        case TupleValue(options*)            =>
             value match
                 case Value.TupleOfValues(values) => ValidationResult.summarize(options.zipAll(values, Schema.Fail(), Value.Fail()).map((s, v) => validateValue(s, v)))
                 case Value.ListOfValues(values)  => ValidationResult.summarize(options.zipAll(values, Schema.Fail(), Value.Fail()).map((s, v) => validateValue(s, v)))
                 case value                       => ValidationResult.reportError(s"expected tuple of values; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case AlternativeValues(options*)   =>
+        case AlternativeValues(options*)     =>
             options
                 .map(s => validateValue(s, value))
                 .find(result => result.isValid)
                 .getOrElse(ValidationResult.reportError(s"could not match value ${ value } with any of the available options"))
-        case ObjectValue(obj)              =>
+        case ObjectValue(obj)                =>
             value match
                 case Value.ObjectWithValues(values) =>
                     ValidationResult.summarize(
@@ -196,10 +278,10 @@ object Validator:
                         )
                     )
                 case value                          => ValidationResult.reportError(s"expected object value; ${ value.valueTypeDescription } found")
-        case MapValue(valueSchema)         =>
+        case MapValue(valueSchema)           =>
             value match
                 case Value.ObjectWithValues(values) => ValidationResult.summarize(values.values.map(v => validateValue(valueSchema, v)))
                 case value                          => ValidationResult.reportError(s"expected map/object value; ${ value.valueTypeDescription } found")
-        case NamedValueReference(_)        => ValidationResult.reportError(s"#WTF: unresolved NamedValueReference still present")
-        case ImportStatement(_, _)         => ValidationResult.reportError(s"#WTF: unresolved ImportStatement still present")
-        case ScopedReference(_, _)         => ValidationResult.reportError(s"#WTF: unresolved ScopedReference still present")
+        case NamedValueReference(_)          => ValidationResult.reportError(s"#WTF: unresolved NamedValueReference still present")
+        case ImportStatement(_, _)           => ValidationResult.reportError(s"#WTF: unresolved ImportStatement still present")
+        case ScopedReference(_, _)           => ValidationResult.reportError(s"#WTF: unresolved ScopedReference still present")

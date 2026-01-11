@@ -440,4 +440,80 @@ object ValidatorSpec extends ZIOSpecDefault:
                         assertTrue(validateJsonString(schema, """["a", "b", "c", "d", "e", "f"]""").isValid == false)
                     )
                 case Left(value)   => assertTrue(value == ""))
+        ,
+        test("binary without encoding accepts any text"):
+            val schemaDefinition = """= binary"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
+                        assertTrue(validateJsonString(schema, """"any random text"""").isValid),
+                        assertTrue(validateJsonString(schema, """"not valid base64!!!"""").isValid)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("binary with base64 encoding validates encoding"):
+            val schemaDefinition = """= binary [ encoding = 'base64' ]"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
+                        assertTrue(validateJsonString(schema, """""""").isValid),
+                        assertTrue(validateJsonString(schema, """"not valid base64!!!"""").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("binary with hex encoding validates encoding"):
+            val schemaDefinition = """= binary [ encoding = 'hex' ]"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """"48656c6c6f"""").isValid),
+                        assertTrue(validateJsonString(schema, """""""").isValid),
+                        assertTrue(validateJsonString(schema, """"48 65 6c 6c 6f"""").isValid),
+                        assertTrue(validateJsonString(schema, """"48656c6c6"""").isValid == false),
+                        assertTrue(validateJsonString(schema, """"ZZZZ"""").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("binary with base64 encoding and size constraint"):
+            val schemaDefinition = """= binary [ encoding = 'base64', bytes == 11 ]"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
+                        assertTrue(validateJsonString(schema, """"SGVsbG8="""").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("binary with size range constraint"):
+            val schemaDefinition = """= binary [ encoding = 'base64', 5 <= bytes <= 20 ]"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
+                        assertTrue(validateJsonString(schema, """"SGk="""").isValid == false),
+                        assertTrue(validateJsonString(schema, """"VGhpcyBpcyBhIHZlcnkgbG9uZyBzdHJpbmcgdGhhdCBpcyB0b28gYmlnIQ=="""").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("binary in object field"):
+            val schemaDefinition = """= { name: text, data: binary [ encoding = 'base64' ] }"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """{"name": "test", "data": "SGVsbG8="}""").isValid),
+                        assertTrue(validateJsonString(schema, """{"name": "test", "data": "!!!invalid!!!"}""").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
+        ,
+        test("binary with base32 encoding"):
+            val schemaDefinition = """= binary [ encoding = 'base32' ]"""
+            allSuccesses(parse(schemaDefinition) match
+                case Right(schema) =>
+                    allSuccesses(
+                        assertTrue(validateJsonString(schema, """"JBSWY3DPEHPK3PXP"""").isValid),
+                        assertTrue(validateJsonString(schema, """"12345678"""").isValid == false)
+                    )
+                case Left(value)   => assertTrue(value == ""))
     )

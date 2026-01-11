@@ -18,6 +18,9 @@ object Value:
     final case class TextValue(value: String) extends Value:
         def valueTypeDescription: String = s"Text"
 
+    final case class BinaryValue(value: Chunk[Byte]) extends Value:
+        def valueTypeDescription: String = s"Binary"
+
     final case class ListOfValues(values: Chunk[Value]) extends Value:
         def valueTypeDescription: String = s"List"
 
