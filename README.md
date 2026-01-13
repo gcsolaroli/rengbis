@@ -359,7 +359,7 @@ gu install native-image
 ```
 
 ## Usage
-The unified `rengbis` executable provides three main commands:
+The unified `rengbis` executable provides two main commands:
 
 ### Validate Schema Files
 ```bash
