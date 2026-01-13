@@ -192,10 +192,10 @@ object SchemaSyntax:
 
     val binaryToTextEncoder: SchemaSyntax[BinaryConstraint.BinaryToTextEncoder] =
         Syntax.string("'hex'", BinaryConstraint.BinaryToTextEncoder.hex)
-        <> Syntax.string("'base64'", BinaryConstraint.BinaryToTextEncoder.base64)
-        <> Syntax.string("'base32'", BinaryConstraint.BinaryToTextEncoder.base32)
-        <> Syntax.string("'base58'", BinaryConstraint.BinaryToTextEncoder.base58)
-        <> Syntax.string("'ascii85'", BinaryConstraint.BinaryToTextEncoder.ascii85)
+            <> Syntax.string("'base64'", BinaryConstraint.BinaryToTextEncoder.base64)
+            <> Syntax.string("'base32'", BinaryConstraint.BinaryToTextEncoder.base32)
+            <> Syntax.string("'base58'", BinaryConstraint.BinaryToTextEncoder.base58)
+            <> Syntax.string("'ascii85'", BinaryConstraint.BinaryToTextEncoder.ascii85)
 
     val encodingConstraint: SchemaSyntax[BinaryConstraint.Constraint] = (
         Syntax.string("encoding", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> binaryToTextEncoder
@@ -242,7 +242,7 @@ object SchemaSyntax:
             c =>
                 val minSize = c.collectFirst { case BinaryConstraint.MinSize(s, u) => s }.getOrElse(0)
                 val maxSize = c.collectFirst { case BinaryConstraint.MaxSize(s, u) => s }.getOrElse(0)
-                val unit = c.collectFirst { case BinaryConstraint.MaxSize(s, u) => u }.getOrElse(BinaryConstraint.BinaryUnit.bytes)
+                val unit    = c.collectFirst { case BinaryConstraint.MaxSize(s, u) => u }.getOrElse(BinaryConstraint.BinaryUnit.bytes)
                 (minSize, SmallerSizeConstraint.LE, unit, SmallerSizeConstraint.LE, maxSize)
         )
         <> (
@@ -453,7 +453,7 @@ object SchemaSyntax:
     val alternativeValuesOptions: SchemaSyntax[Schema] = listOfValues.widen[Schema] <> item
 
     val alternativeValues: SchemaSyntax[Schema.AlternativeValues | Schema.EnumValues] = (alternativeValuesOptions
-        .repeatWithSep(whitespaces ~ Syntax.char('|') ~ whitespaces))
+        .repeatWithSep(whitespaces ~ emptyLines ~ whitespaces ~ Syntax.char('|') ~ whitespaces))
         .filter(options => options.size > 1, s"alternatives needs to have at least two items")
         .transform(
             options =>

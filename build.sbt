@@ -18,11 +18,11 @@ ThisBuild / scalacOptions ++= Seq(
 
 val RENGBIS_VERSION = "0.0.1"
 
-val zio            = "2.1.24"
-val zio_json       = "0.7.45"
-val zio_parser     = "0.1.11"
-val zio_cli        = "0.7.4"
-val yaml4s_version = "0.3.2"
+val zio                   = "2.1.24"
+val zio_json              = "0.7.45"
+val zio_parser            = "0.1.11"
+val zio_cli               = "0.7.4"
+val yaml4s_version        = "0.3.2"
 val tototoshi_csv_version = "2.0.0"
 
 lazy val execjar = taskKey[File]("Create executable JAR using execjar tool")
@@ -125,7 +125,7 @@ lazy val cli = project
 
 lazy val coreDependencies = Seq(
     libraryDependencies ++= Seq(
-        "org.scala-lang.modules" %% "scala-xml"       % "2.3.0",
+        "org.scala-lang.modules" %% "scala-xml"       % "2.4.0",
         "dev.zio"                %% "zio"             % zio,
         "dev.zio"                %% "zio-json"        % zio_json,
         "dev.zio"                %% "zio-parser"      % zio_parser,

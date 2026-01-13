@@ -291,8 +291,19 @@ The `root` element of the imported schema definition may also be used, just refe
 This is a very early prototype, shared only to get some feedback; besides the few tests included in the code base, it has not been used anywhere else.
 
 ## Future enhancements
+
+### Error messages
+At the moment no attention at all have been put into producing meaningful error message, neither when validating a schema, nor when validating data files.
+This means that the current situation is very mean, but also that there are massive opportunities for improvements!
+
+### Editor integrations
+We would love to have VSCode and Zed extensions for syntax-highlighting *.rengbis files.
+It would also be awesome to be able to have schema validation when editing files in the supported formats, but that may be trickier to pull off.
+
+### ZIO Schema
 Before venturing into this experiment, we tried working with [`zio-schema`](https://github.com/zio/zio-schema); unfortunately we were not able to find a way to use that library to achieve our goals.
 [Lately](https://x.com/jdegoes/status/1919380595597090856) a [new version](https://github.com/zio/zio-blocks) of `zio-schema` has been announced; we haven't had the time to explore it yet, but the idea of using `rengbis` as a language to define `zio-schema` values that could be later leveraged to validate/parse actual payloads, getting rid of the custom machinery we had to build, seems an interesting option to explore.
+
 
 
 ## Project Structure

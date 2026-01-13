@@ -12,7 +12,7 @@ import java.util.logging.LogManager
 object Main extends ZIOCliDefault:
 
     enum Format:
-        case Json, Yaml, Xml
+        case Json, Yaml, Xml, Csv
 
     enum RengbisCommand:
         case ValidateSchema(schemaFiles: List[Path])
@@ -23,7 +23,8 @@ object Main extends ZIOCliDefault:
             .enumeration[Format]("format")(
                 "json" -> Format.Json,
                 "yaml" -> Format.Yaml,
-                "xml"  -> Format.Xml
+                "xml"  -> Format.Xml,
+                "csv"  -> Format.Csv
             )
             .alias("f")
 
@@ -103,11 +104,11 @@ object Main extends ZIOCliDefault:
             selectedSchema                   = schema match
                                                    case Some(s) => loadedSchema.definitions(s)
                                                    case None    => loadedSchema.root.get
-            // parser: DataParsers.FileParser = format match
             parser: DataParsers.Parser[Path] = format match
                                                    case Format.Json => DataParsers.json
                                                    case Format.Yaml => DataParsers.yaml
                                                    case Format.Xml  => DataParsers.xml
+                                                   case Format.Csv  => DataParsers.csv
             results                         <- ZIO.foreach(dataFiles) { file =>
                                                    val result = Validator.validate(parser(file))(selectedSchema)
 
