@@ -6,6 +6,9 @@ import Schema.{ AlternativeValues, BinaryValue, EnumValues, ImportStatement, Man
 import Schema.{ BinaryConstraint, BoundConstraint, BoundOp, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint }
 
 object SchemaSyntax:
+    import Extensions.*
+    import BoundConstraintHelpers.{ boundConstraintSyntax, groupNumericConstraints }
+
     type SchemaSyntax[A] = zio.parser.Syntax[String, Char, Char, A]
 
     val Tab   = '\u0009'
@@ -13,8 +16,9 @@ object SchemaSyntax:
     val LF    = '\u000A'
     val CR    = '\u000D'
 
-    val whitespaces: SchemaSyntax[Unit] = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk())
-    val comment: SchemaSyntax[Unit]     = (Syntax.char('#') ~ Syntax.charNotIn('\n').repeat0).unit(Chunk())
+    val whitespaces: SchemaSyntax[Unit]  = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk(' '))
+    val whitespaces0: SchemaSyntax[Unit] = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk())
+    val comment: SchemaSyntax[Unit]      = (Syntax.char('#') ~ Syntax.charNotIn('\n').repeat0).unit(Chunk())
 
     val number: SchemaSyntax[Int] = Syntax.digit.repeat.transform(
         chars => chars.mkString.toInt,
@@ -27,98 +31,30 @@ object SchemaSyntax:
     val escapedChar: SchemaSyntax[Char]    = Syntax.charNotIn('\"') // TODO: real escaping support
     val quotedString: SchemaSyntax[String] = (quote ~> escapedChar.*.string <~ quote)
 
-    sealed trait SizeConstraint
-    enum SmallerSizeConstraint  extends SizeConstraint:
-        case LT, LE
-    enum ExtendedSizeConstraint extends SizeConstraint:
-        case EQ, GT, GE
-
-    val smallerSizeConstrint: SchemaSyntax[SmallerSizeConstraint] =
-        Syntax.string("<=", SmallerSizeConstraint.LE)
-            <> Syntax.string("<", SmallerSizeConstraint.LT)
-
-    val sizeConstraint: SchemaSyntax[SizeConstraint] =
-        Syntax.string("==", ExtendedSizeConstraint.EQ)
-            <> Syntax.string(">=", ExtendedSizeConstraint.GE)
-            <> Syntax.string(">", ExtendedSizeConstraint.GT)
-            <> smallerSizeConstrint.widen[SizeConstraint]
-
-    def boundConstraintSyntax[K, V](
-        keySyntax: SchemaSyntax[K],
-        valueSyntax: SchemaSyntax[V]
-    ): SchemaSyntax[Chunk[(K, BoundConstraint[V])]] =
-        // Form 1: key op value (e.g., "length >= 5")
-        (keySyntax ~ whitespaces ~ sizeConstraint ~ whitespaces ~ valueSyntax).transform(
-            (k, c, v) =>
-                val op = c match
-                    case ExtendedSizeConstraint.EQ => BoundOp.Exact
-                    case ExtendedSizeConstraint.GT => BoundOp.MinExclusive
-                    case ExtendedSizeConstraint.GE => BoundOp.MinInclusive
-                    case SmallerSizeConstraint.LT  => BoundOp.MaxExclusive
-                    case SmallerSizeConstraint.LE  => BoundOp.MaxInclusive
-                Chunk((k, BoundConstraint(op, v)))
-            ,
-            c =>
-                val (k, bound) = c.head
-                val op         = bound.op match
-                    case BoundOp.Exact        => ExtendedSizeConstraint.EQ
-                    case BoundOp.MinInclusive => ExtendedSizeConstraint.GE
-                    case BoundOp.MinExclusive => ExtendedSizeConstraint.GT
-                    case BoundOp.MaxInclusive => SmallerSizeConstraint.LE
-                    case BoundOp.MaxExclusive => SmallerSizeConstraint.LT
-                (k, op, bound.value)
-        )
-        // Form 2: value op key op value (e.g., "5 <= length <= 10")
-            <> (valueSyntax ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ keySyntax ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ valueSyntax)
-                .transform(
-                    (lo, lc, k, uc, up) =>
-                        val minOp = if lc == SmallerSizeConstraint.LT then BoundOp.MinExclusive else BoundOp.MinInclusive
-                        val maxOp = if uc == SmallerSizeConstraint.LT then BoundOp.MaxExclusive else BoundOp.MaxInclusive
-                        Chunk((k, BoundConstraint(minOp, lo)), (k, BoundConstraint(maxOp, up)))
-                    ,
-                    c =>
-                        val (k, minBound) = c.find((_, b) => b.isMinInclusive || b.isMinExclusive).get
-                        val (_, maxBound) = c.find((_, b) => b.isMaxInclusive || b.isMaxExclusive).get
-                        val minOp         = if minBound.isMinExclusive then SmallerSizeConstraint.LT else SmallerSizeConstraint.LE
-                        val maxOp         = if maxBound.isMaxExclusive then SmallerSizeConstraint.LT else SmallerSizeConstraint.LE
-                        (minBound.value, minOp, k, maxOp, maxBound.value)
-                )
-            // Form 3: value op key (e.g., "5 <= length")
-            <> (valueSyntax ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ keySyntax).transform(
-                (v, lc, k) =>
-                    val op = if lc == SmallerSizeConstraint.LT then BoundOp.MinExclusive else BoundOp.MinInclusive
-                    Chunk((k, BoundConstraint(op, v)))
-                ,
-                c =>
-                    val (k, bound) = c.head
-                    val op         = if bound.isMinExclusive then SmallerSizeConstraint.LT else SmallerSizeConstraint.LE
-                    (bound.value, op, k)
-            )
-
-    val sizeTextConstraints: SchemaSyntax[Chunk[TextConstraint.Size]] =
-        boundConstraintSyntax(Syntax.string("length", ()), number).transform(
+    val sizeTextConstraints: SchemaSyntax[Chunk[TextConstraint.Size]] = boundConstraintSyntax(Syntax.string("length", ()), number)
+        .transform(
             bounds => bounds.map((_, b) => TextConstraint.Size(b)),
             sizes => sizes.map(s => ((), s.bound))
         )
 
-    val regexTextConstraint: SchemaSyntax[TextConstraint.Constraint] = (
+    val regexTextConstraint: SchemaSyntax[TextConstraint.Regex] = (
         Syntax.string("regex", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString
     ).transform(
         text => TextConstraint.Regex(text),
         c => c.pattern
-    ).widen[TextConstraint.Constraint]
+    )
 
-    val formatTextConstraint: SchemaSyntax[TextConstraint.Constraint] = (
+    val formatTextConstraint: SchemaSyntax[TextConstraint.Format] = (
         Syntax.string("pattern", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString
     ).transform(
         text => TextConstraint.Format(text),
         c => c.format
-    ).widen[TextConstraint.Constraint]
+    )
 
     val textConstraints: SchemaSyntax[Chunk[TextConstraint.Constraint]] =
-        sizeTextConstraints.widen[Chunk[TextConstraint.Constraint]]
-            <> regexTextConstraint.+
-            <> formatTextConstraint.+
+        sizeTextConstraints.asChunkOf[TextConstraint.Constraint] { case s: TextConstraint.Size => s }
+            <> regexTextConstraint.as[TextConstraint.Constraint] { case r: TextConstraint.Regex => r }.+
+            <> formatTextConstraint.as[TextConstraint.Constraint] { case f: TextConstraint.Format => f }.+
 
     val textValue: SchemaSyntax[Schema.TextValue] = (
         Syntax.string("text", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> textConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
@@ -138,23 +74,23 @@ object SchemaSyntax:
         num => num.toString
     )
 
-    val integerConstraint: SchemaSyntax[NumericConstraint.Constraint] = Syntax.string("integer", NumericConstraint.Integer).widen[NumericConstraint.Constraint]
+    val integerConstraint: SchemaSyntax[NumericConstraint.Integer.type] = Syntax.string("integer", NumericConstraint.Integer)
 
-    val valueNumericConstraints: SchemaSyntax[Chunk[NumericConstraint.Value]] =
-        boundConstraintSyntax(Syntax.string("value", ()), decimalNumber).transform(
+    val valueNumericConstraints: SchemaSyntax[Chunk[NumericConstraint.Value]] = boundConstraintSyntax(Syntax.string("value", ()), decimalNumber)
+        .transform(
             bounds => bounds.map((_, b) => NumericConstraint.Value(b)),
             values => values.map(v => ((), v.bound))
         )
 
     val numericConstraints: SchemaSyntax[Chunk[NumericConstraint.Constraint]] =
-        valueNumericConstraints.widen[Chunk[NumericConstraint.Constraint]]
-            <> integerConstraint.+
+        valueNumericConstraints.asChunkOf[NumericConstraint.Constraint] { case v: NumericConstraint.Value => v }
+            <> integerConstraint.as[NumericConstraint.Constraint] { case NumericConstraint.Integer => NumericConstraint.Integer }.+
 
     val numericValue: SchemaSyntax[Schema.NumericValue] = (
         Syntax.string("number", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> numericConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
     ).transform(
         constraints => NumericValue(constraints.map(_.flatMap(identity)).getOrElse(Chunk()).toList*),
-        numericValue => if numericValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(numericValue.constraints)))
+        numericValue => if numericValue.constraints.isEmpty then None else Some(groupNumericConstraints(numericValue.constraints.toSeq))
     )
 
     val binaryToTextEncoder: SchemaSyntax[BinaryConstraint.BinaryToTextEncoder] =
@@ -164,22 +100,22 @@ object SchemaSyntax:
             <> Syntax.string("'base58'", BinaryConstraint.BinaryToTextEncoder.base58)
             <> Syntax.string("'ascii85'", BinaryConstraint.BinaryToTextEncoder.ascii85)
 
-    val encodingConstraint: SchemaSyntax[BinaryConstraint.Constraint] = (
+    val encodingConstraint: SchemaSyntax[BinaryConstraint.Encoding] = (
         Syntax.string("encoding", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> binaryToTextEncoder
     ).transform(
         encoder => BinaryConstraint.Encoding(encoder),
         c => c.encoder
-    ).widen[BinaryConstraint.Constraint]
+    )
 
     val sizeBinaryUnit: SchemaSyntax[BinaryConstraint.BinaryUnit] =
-        Syntax.string("bits", BinaryConstraint.BinaryUnit.bytes)
-            <> Syntax.string("bytes", BinaryConstraint.BinaryUnit.bytes)
+        Syntax.string("bytes", BinaryConstraint.BinaryUnit.bytes)
+            <> Syntax.string("bits", BinaryConstraint.BinaryUnit.bytes)
             <> Syntax.string("KB", BinaryConstraint.BinaryUnit.KB)
             <> Syntax.string("MB", BinaryConstraint.BinaryUnit.MB)
             <> Syntax.string("GB", BinaryConstraint.BinaryUnit.GB)
 
-    val sizeBinaryConstraints: SchemaSyntax[Chunk[BinaryConstraint.Size]] =
-        boundConstraintSyntax(sizeBinaryUnit, number).transform(
+    val sizeBinaryConstraints: SchemaSyntax[Chunk[BinaryConstraint.Size]] = boundConstraintSyntax(sizeBinaryUnit, number)
+        .transform(
             bounds =>
                 bounds.map((unit, b) =>
                     val normalizedValue = b.value * unit.bytes
@@ -189,7 +125,8 @@ object SchemaSyntax:
         )
 
     val binaryConstraints: SchemaSyntax[Chunk[BinaryConstraint.Constraint]] =
-        sizeBinaryConstraints.widen[Chunk[BinaryConstraint.Constraint]] <> encodingConstraint.+
+        sizeBinaryConstraints.asChunkOf[BinaryConstraint.Constraint] { case s: BinaryConstraint.Size => s }
+            <> encodingConstraint.as[BinaryConstraint.Constraint] { case e: BinaryConstraint.Encoding => e }.+
 
     val binaryValue: SchemaSyntax[Schema.BinaryValue] = (
         Syntax.string("binary", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> binaryConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
@@ -200,17 +137,19 @@ object SchemaSyntax:
 
     val label: SchemaSyntax[String] = (Syntax.letter ~ (Syntax.alphaNumeric <> Syntax.charIn("_-")).repeat0).string
 
-    val madatoryLabel: SchemaSyntax[ObjectLabel] = label.transform(
+    val madatoryLabel: SchemaSyntax[MandatoryLabel] = label.transform(
         s => MandatoryLabel(s),
         l => l.label
     )
-    val optionalLabel: SchemaSyntax[ObjectLabel] = (
+    val optionalLabel: SchemaSyntax[OptionalLabel]  = (
         label <~ Syntax.char('?')
     ).transform(
         s => OptionalLabel(s),
         l => l.label
     )
-    val objectLabel: SchemaSyntax[ObjectLabel]   = optionalLabel <> madatoryLabel
+    val objectLabel: SchemaSyntax[ObjectLabel]      =
+        optionalLabel.as[ObjectLabel] { case o: OptionalLabel => o }
+            <> madatoryLabel.as[ObjectLabel] { case m: MandatoryLabel => m }
 
     val valueDefinition: SchemaSyntax[Schema] = Syntax.char('=') ~ whitespaces ~ items
 
@@ -245,8 +184,8 @@ object SchemaSyntax:
 
     val objectValue: SchemaSyntax[Schema.ObjectValue] = (
         Syntax.char('{') ~> (emptyLines ~ whitespaces ~
-            objectLabel ~ Syntax.char(':') ~ whitespaces ~ items).repeatWithSep(whitespaces ~ (Syntax.char(',') <> emptyLines))
-            ~ whitespaces ~ emptyLines <~ whitespaces ~ Syntax.char('}')
+            objectLabel ~ Syntax.char(':') ~ whitespaces ~ items).repeatWithSep(whitespaces0 ~ (Syntax.char(',') <> emptyLines))
+            ~ whitespaces ~ emptyLines <~ whitespaces0 ~ Syntax.char('}')
     ).transform(
         keys => Schema.ObjectValue(keys.toMap),
         obj => Chunk.fromIterable(obj.obj)
@@ -255,27 +194,28 @@ object SchemaSyntax:
     val mapSpreadKey: SchemaSyntax[Unit]        = Syntax.string("...", ()) <> Syntax.string("…", ())
     val mapValue: SchemaSyntax[Schema.MapValue] = (
         Syntax.char('{') ~> whitespaces
-            ~ mapSpreadKey ~ whitespaces ~ Syntax.char(':') ~ whitespaces ~ items
+            ~ mapSpreadKey ~ whitespaces0 ~ Syntax.char(':') ~ whitespaces ~ items
             ~ whitespaces <~ Syntax.char('}')
     ).transform(
         valueSchema => Schema.MapValue(valueSchema),
         mapVal => mapVal.valueSchema
     )
 
-    val item: SchemaSyntax[Schema] = anyValue.widen[Schema]
-        <> booleanValue.widen[Schema]
-        <> numericValue.widen[Schema]
-        <> binaryValue.widen[Schema]
-        <> textValue.widen[Schema]
-        <> givenTextValue.widen[Schema]
-        <> mapValue.widen[Schema]
-        <> objectValue.widen[Schema]
-        <> (Syntax.char('(') ~ whitespaces ~> alternativeValues <~ whitespaces ~ Syntax.char(')')).widen[Schema]
-        <> tupleValues.widen[Schema]
-        <> scopedReference.widen[Schema]
-        <> namedValueReference.widen[Schema]
+    val item: SchemaSyntax[Schema] =
+        anyValue.asSchema { case a: Schema.AnyValue => a }
+            <> booleanValue.asSchema { case b: Schema.BooleanValue => b }
+            <> numericValue.asSchema { case n: Schema.NumericValue => n }
+            <> binaryValue.asSchema { case b: Schema.BinaryValue => b }
+            <> textValue.asSchema { case t: Schema.TextValue => t }
+            <> givenTextValue.asSchema { case g: Schema.GivenTextValue => g }
+            <> mapValue.asSchema { case m: Schema.MapValue => m }
+            <> objectValue.asSchema { case o: Schema.ObjectValue => o }
+            <> groupedAlternatives.asSchema { case e: Schema.EnumValues => e; case a: Schema.AlternativeValues => a }
+            <> tupleValues.asSchema { case t: Schema.TupleValue => t }
+            <> scopedReference.asSchema { case s: Schema.ScopedReference => s }
+            <> namedValueReference.asSchema { case n: Schema.NamedValueReference => n }
 
-    val uniqueConstraint: SchemaSyntax[ListConstraint.Constraint]             = Syntax.string("unique", ListConstraint.Unique).widen[ListConstraint.Constraint]
+    val uniqueConstraint: SchemaSyntax[ListConstraint.Unique.type]            = Syntax.string("unique", ListConstraint.Unique)
     val uniqueByFieldsConstraint: SchemaSyntax[ListConstraint.UniqueByFields] = (
         Syntax.string("unique", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~
             Syntax.char('(') ~ whitespaces ~
@@ -292,17 +232,17 @@ object SchemaSyntax:
         c => c.fields.head
     )
 
-    val listSizeConstraints: SchemaSyntax[Chunk[ListConstraint.Size]] =
-        boundConstraintSyntax(Syntax.string("size", ()), number).transform(
+    val listSizeConstraints: SchemaSyntax[Chunk[ListConstraint.Size]] = boundConstraintSyntax(Syntax.string("size", ()), number)
+        .transform(
             bounds => bounds.map((_, b) => ListConstraint.Size(b)),
             sizes => sizes.map(s => ((), s.bound))
         )
 
     val listConstraint: SchemaSyntax[Chunk[ListConstraint.Constraint]] =
-        listSizeConstraints.widen[Chunk[ListConstraint.Constraint]]
-            <> uniqueByFieldsConstraint.transform(c => Chunk(c), cs => cs.head.asInstanceOf[ListConstraint.UniqueByFields])
-            <> uniqueByFieldConstraint.transform(c => Chunk(c), cs => cs.head.asInstanceOf[ListConstraint.UniqueByFields])
-            <> uniqueConstraint.transform(c => Chunk(c), cs => cs.head)
+        listSizeConstraints.asChunkOf[ListConstraint.Constraint] { case s: ListConstraint.Size => s }
+            <> uniqueByFieldsConstraint.as[ListConstraint.Constraint] { case u: ListConstraint.UniqueByFields if u.fields.size > 1 => u }.+
+            <> uniqueByFieldConstraint.as[ListConstraint.Constraint] { case u: ListConstraint.UniqueByFields if u.fields.size == 1 => u }.+
+            <> uniqueConstraint.as[ListConstraint.Constraint] { case ListConstraint.Unique => ListConstraint.Unique }.+
 
     val listConstraintBlock: SchemaSyntax[Chunk[ListConstraint.Constraint]] = (
         whitespaces ~ Syntax.char('[') ~ whitespaces ~>
@@ -313,35 +253,40 @@ object SchemaSyntax:
         chunk => Chunk(chunk)
     )
 
-    val listOfValues: SchemaSyntax[Schema.ListOfValues] =
-        ((item <~ Syntax.char('*')) ~ listConstraintBlock).transform(
-            (itemSchema, constraints) => Schema.ListOfValues(itemSchema, constraints.toSeq*),
-            items => (items.schema, Chunk.fromIterable(items.constraints))
-        )
-            <> (item <~ Syntax.char('*')).transform(
-                itemSchema => Schema.ListOfValues(itemSchema),
-                items => items.schema
-            )
-            <> ((item <~ Syntax.char('+')) ~ listConstraintBlock).transform(
-                (itemSchema, constraints) => Schema.ListOfValues(itemSchema, (ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1)) +: constraints.toSeq)*),
-                items => (items.schema, Chunk.fromIterable(items.constraints.filterNot(_ == ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1)))))
-            )
-            <> (item <~ Syntax.char('+')).transform(
-                itemSchema => Schema.ListOfValues(itemSchema, ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1))),
-                items => items.schema
-            )
+    val nonEmptyMarker: SchemaSyntax[Boolean] = Syntax.string("+", true) <> Syntax.string("*", false)
 
-    val tupleValues: SchemaSyntax[Schema.TupleValue] = (Syntax.char('(') ~> (emptyLines ~ whitespaces ~ item).repeatWithSep(whitespaces ~ (Syntax.char(',') <> emptyLines)) <~ whitespaces ~ Syntax.char(')'))
+    val listSuffix: SchemaSyntax[Chunk[ListConstraint.Constraint]] =
+        val atLeastOne = ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1))
+
+        (nonEmptyMarker ~ listConstraintBlock.optional).transform(
+            (isPlus, extra) =>
+                val base = if isPlus then Chunk(atLeastOne) else Chunk.empty
+                base ++ extra.getOrElse(Chunk.empty)
+            ,
+            constraints =>
+                val hasMinOne = constraints.contains(atLeastOne)
+                val others    = constraints.filterNot(_ == atLeastOne)
+                (hasMinOne, if others.isEmpty then None else Some(others))
+        )
+
+    val listOfValues: SchemaSyntax[Schema.ListOfValues] =
+        (item ~ listSuffix).transform(
+            (schema, constraints) => Schema.ListOfValues(schema, constraints.toSeq*),
+            list => (list.schema, Chunk.fromIterable(list.constraints))
+        )
+
+    val tupleValues: SchemaSyntax[Schema.TupleValue] = (Syntax.char('(') ~> (emptyLines ~ whitespaces0 ~ item).repeatWithSep(whitespaces0 ~ (Syntax.char(',') <> emptyLines) ~ whitespaces) <~ whitespaces0 ~ Syntax.char(')'))
         .filter(values => values.size > 1, s"tuple needs to have at least two items")
         .transform(
             values => Schema.TupleValue(values*),
             tuple => Chunk.fromIterable(tuple.options)
         )
 
-    val alternativeValuesOptions: SchemaSyntax[Schema] = listOfValues.widen[Schema] <> item
+    val alternativeValuesOptions: SchemaSyntax[Schema] =
+        listOfValues.asSchema { case l: Schema.ListOfValues => l } <> item
 
     val alternativeValues: SchemaSyntax[Schema.AlternativeValues | Schema.EnumValues] = (alternativeValuesOptions
-        .repeatWithSep(whitespaces ~ emptyLines ~ whitespaces ~ Syntax.char('|') ~ whitespaces))
+        .repeatWithSep(whitespaces0 ~ emptyLines ~ whitespaces ~ Syntax.char('|') ~ whitespaces))
         .filter(options => options.size > 1, s"alternatives needs to have at least two items")
         .transform(
             options =>
@@ -354,10 +299,13 @@ object SchemaSyntax:
                     case AlternativeValues(options*) => Chunk.fromIterable(options)
         )
 
+    val groupedAlternatives: SchemaSyntax[Schema.AlternativeValues | Schema.EnumValues] =
+        Syntax.char('(') ~ whitespaces ~> alternativeValues <~ whitespaces ~ Syntax.char(')')
+
     lazy val items: SchemaSyntax[Schema] =
-        alternativeValues.widen[Schema]
-            <> listOfValues.widen[Schema]
-            <> tupleValues.widen[Schema]
+        alternativeValues.asSchema { case e: Schema.EnumValues => e; case a: Schema.AlternativeValues => a }
+            <> listOfValues.asSchema { case l: Schema.ListOfValues => l }
+            <> tupleValues.asSchema { case t: Schema.TupleValue => t }
             <> item
 
     val root: SchemaSyntax[Schema] = valueDefinition
@@ -371,3 +319,87 @@ object SchemaSyntax:
             ~ root.optional
             ~ emptyLines ~ whitespaces) <~ Syntax.end
     )
+
+    // ========================================================================
+
+    object BoundConstraintHelpers:
+        def boundConstraintSyntax[K, V](keySyntax: SchemaSyntax[K], valueSyntax: SchemaSyntax[V]): SchemaSyntax[Chunk[(K, BoundConstraint[V])]] =
+            // Form 1: value op key op value (e.g., "5 <= length <= 10") - must come first for printing ranges
+            (valueSyntax ~ whitespaces ~ smallerOpAsMin ~ whitespaces ~ keySyntax ~ whitespaces ~ smallerOpAsMax ~ whitespaces ~ valueSyntax)
+                .transformTo(
+                    { case (lo, minOp, k, maxOp, up) => Chunk((k, BoundConstraint(minOp, lo)), (k, BoundConstraint(maxOp, up))) },
+                    bracketed,
+                    "not a range constraint"
+                )
+            // Form 2: key op value (e.g., "length >= 5")
+                <> (keySyntax ~ whitespaces ~ boundOpForKeyOpValue ~ whitespaces ~ valueSyntax).transformTo(
+                    { case (k, op, v) => Chunk((k, BoundConstraint(op, v))) },
+                    rightValue,
+                    "not a single bound constraint"
+                )
+                // Form 3: value op key (e.g., "5 <= length")
+                <> (valueSyntax ~ whitespaces ~ smallerOpAsMin ~ whitespaces ~ keySyntax).transformTo(
+                    { case (v, op, k) => Chunk((k, BoundConstraint(op, v))) },
+                    leftValue,
+                    "not a min bound constraint"
+                )
+
+        def groupNumericConstraints(constraints: Seq[NumericConstraint.Constraint]): Chunk[Chunk[NumericConstraint.Constraint]] =
+            val integers = constraints.collect { case i: NumericConstraint.Integer.type => i }
+            val values   = constraints.collect { case v: NumericConstraint.Value => v }
+            val result   = Chunk.fromIterable(integers.map(i => Chunk(i: NumericConstraint.Constraint))) ++
+                (if values.nonEmpty then Chunk(Chunk.fromIterable(values)) else Chunk.empty)
+            result
+
+        protected val boundOpForKeyOpValue: SchemaSyntax[BoundOp] =
+            Syntax.string("==", BoundOp.Exact)
+                <> Syntax.string(">=", BoundOp.MinInclusive)
+                <> Syntax.string(">", BoundOp.MinExclusive)
+                <> Syntax.string("<=", BoundOp.MaxInclusive)
+                <> Syntax.string("<", BoundOp.MaxExclusive)
+
+        protected val smallerOpAsMin: SchemaSyntax[BoundOp] = Syntax.string("<=", BoundOp.MinInclusive) <> Syntax.string("<", BoundOp.MinExclusive)
+        protected val smallerOpAsMax: SchemaSyntax[BoundOp] = Syntax.string("<=", BoundOp.MaxInclusive) <> Syntax.string("<", BoundOp.MaxExclusive)
+
+        protected def isMinBound(op: BoundOp): Boolean = op == BoundOp.MinInclusive || op == BoundOp.MinExclusive
+        protected def isMaxBound(op: BoundOp): Boolean = op == BoundOp.MaxInclusive || op == BoundOp.MaxExclusive
+
+        /** Prints "value op key op value" (e.g., "5 <= length <= 10") */
+        protected def bracketed[K, V]: PartialFunction[Chunk[(K, BoundConstraint[V])], (V, BoundOp, K, BoundOp, V)] =
+            case c if c.size == 2 && c.exists((_, b) => isMinBound(b.op)) && c.exists((_, b) => isMaxBound(b.op)) =>
+                val (k, minBound) = c.find((_, b) => isMinBound(b.op)).get
+                val (_, maxBound) = c.find((_, b) => isMaxBound(b.op)).get
+                (minBound.value, minBound.op, k, maxBound.op, maxBound.value)
+
+        /** Prints "key op value" (e.g., "length >= 5") */
+        protected def rightValue[K, V]: PartialFunction[Chunk[(K, BoundConstraint[V])], (K, BoundOp, V)] =
+            case c if c.size == 1 =>
+                val (k, bound) = c.head
+                (k, bound.op, bound.value)
+
+        /** Prints "value op key" (e.g., "5 <= length") */
+        protected def leftValue[K, V]: PartialFunction[Chunk[(K, BoundConstraint[V])], (V, BoundOp, K)] =
+            case c if c.size == 1 && isMinBound(c.head._2.op) =>
+                val (k, bound) = c.head
+                (bound.value, bound.op, k)
+
+    // . .  . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
+
+    object Extensions:
+        extension [A <: Schema](syntax: SchemaSyntax[A])
+            def asSchema(narrow: PartialFunction[Schema, A]): SchemaSyntax[Schema] =
+                syntax.transformTo[String, Schema, Schema](identity, narrow, "type mismatch")
+
+        extension [A](syntax: SchemaSyntax[A])
+            /** Widens A to B (where A <: B) using a partial function for the reverse (printing) direction */
+            def as[B >: A](narrow: PartialFunction[B, A]): SchemaSyntax[B] =
+                syntax.transformTo[String, B, B](identity, narrow, "type mismatch")
+
+        extension [A](syntax: SchemaSyntax[Chunk[A]])
+            /** Widens Chunk[A] to Chunk[B], checking all elements are of type A when printing */
+            def asChunkOf[B >: A](narrow: PartialFunction[B, A]): SchemaSyntax[Chunk[B]] =
+                syntax.transformTo[String, Chunk[B], Chunk[B]](
+                    identity,
+                    { case cs if cs.forall(narrow.isDefinedAt) => cs.map(narrow) },
+                    "type mismatch"
+                )
