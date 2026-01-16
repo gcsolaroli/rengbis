@@ -67,14 +67,22 @@ object Schema:
         def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] = Right(this)
         def dependencies: Seq[String]                                                   = Seq.empty
 
-    final case class Fail()                                                   extends Schema
-    final case class AnyValue()                                               extends Schema
-    final case class BooleanValue()                                           extends Schema
-    final case class TextValue(constraints: TextConstraint.Constraint*)       extends Schema
-    final case class GivenTextValue(value: String)                            extends Schema
-    final case class NumericValue(constraints: NumericConstraint.Constraint*) extends Schema
-    final case class BinaryValue(constraints: BinaryConstraint.Constraint*)   extends Schema
-    final case class EnumValues(values: String*)                              extends Schema
+    final case class Fail()         extends Schema
+    final case class AnyValue()     extends Schema
+    final case class BooleanValue() extends Schema
+
+    final case class TextValue(constraints: Seq[TextConstraint.Constraint] = Seq.empty, default: Option[String] = None) extends Schema
+    object TextValue:
+        def apply(constraints: TextConstraint.Constraint*): TextValue = TextValue(constraints.toSeq, None)
+
+    final case class GivenTextValue(value: String) extends Schema
+
+    final case class NumericValue(constraints: Seq[NumericConstraint.Constraint] = Seq.empty, default: Option[BigDecimal] = None) extends Schema
+    object NumericValue:
+        def apply(constraints: NumericConstraint.Constraint*): NumericValue = NumericValue(constraints.toSeq, None)
+
+    final case class BinaryValue(constraints: BinaryConstraint.Constraint*) extends Schema
+    final case class EnumValues(values: String*)                            extends Schema
 
     final case class ListOfValues(schema: Schema, constraints: ListConstraint.Constraint*) extends Schema:
         override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =

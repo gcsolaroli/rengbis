@@ -76,6 +76,7 @@ The current validation procedure is implemented on a generic `rengbis.Value` dat
 Here is a brief run down of the currently supported features:
 - [Types](#types)
 - [Constraints](#constraints)
+- [Default values](#default_values)
 - [Comments](#comments)
 - [Import](#import)
 
@@ -263,6 +264,19 @@ structure = {
 At the moment there are a few limits on how this constraints may be defined:
 - uniqueness can only be defined on basic values (text, number, boolean) or combination of such basic values
 - only direct elements of the object where uniqueness constraints are defined may be referenced
+
+## Default values
+It is possible to specify a default value for `text` and `number` fields using the `?=` operator. This is useful when importing schemas from other formats that support defaults (like JSON Schema, Avro, or Protocol Buffers).
+
+```rengbis
+= {
+    status: text ?= "active"
+    retryCount: number [ integer ] ?= 0
+    maxLength: number ?= 100
+}
+```
+
+Default values are only allowed on mandatory fields, not on optional fields (marked with `?`).
 
 ## Comments
 Anything after a `#` character, up to the end of the line, is ignored by the parser and thus treated as a comment.

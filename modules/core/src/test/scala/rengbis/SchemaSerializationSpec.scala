@@ -7,23 +7,6 @@ import rengbis.testHelpers.{ binBytes, listSize, numValue, textLength }
 
 object SchemaSerializationSpec extends ZIOSpecDefault:
 
-    def print(schema: Schema): Either[String, String] =
-        SchemaSyntax.items.printString(schema).left.map(_.toString)
-
-    def roundTrip(schema: Schema): Either[String, Schema] =
-        for
-            printed <- print(schema)
-            parsed  <- SchemaLoader.parseSchema(s"= $printed").flatMap(_.getRootSchema)
-        yield parsed
-
-    def printTest(schema: Schema, expectedOutput: String) =
-        test(s"print: $expectedOutput"):
-            assertTrue(print(schema) == Right(expectedOutput))
-
-    def roundTripTest(schema: Schema, description: String) =
-        test(s"roundtrip: $description"):
-            assertTrue(roundTrip(schema) == Right(schema))
-
     def spec = suite("Schema serialization")(
         suite("Basic types")(
             printTest(AnyValue(), "any"),
@@ -39,13 +22,17 @@ object SchemaSerializationSpec extends ZIOSpecDefault:
             printTest(TextValue(textLength > 10), "text [ length > 10 ]"),
             printTest(TextValue(textLength < 100), "text [ length < 100 ]"),
             printTest(TextValue(TextConstraint.Regex("^[a-z]+$")), """text [ regex = "^[a-z]+$" ]"""),
-            printTest(TextValue(TextConstraint.Format("###-####")), """text [ pattern = "###-####" ]""")
+            printTest(TextValue(TextConstraint.Format("###-####")), """text [ pattern = "###-####" ]"""),
+            printTest(TextValue(Seq.empty, Some("active")), """text ?= "active""""),
+            printTest(TextValue(Seq(textLength <= 100), Some("default")), """text [ length <= 100 ] ?= "default"""")
         ),
         suite("Numeric with constraints")(
             printTest(NumericValue(NumericConstraint.Integer), "number [ integer ]"),
             printTest(NumericValue(numValue >= 0), "number [ value >= 0 ]"),
             printTest(NumericValue(numValue <= 100), "number [ value <= 100 ]"),
-            printTest(NumericValue(numValue === 42), "number [ value == 42 ]")
+            printTest(NumericValue(numValue === 42), "number [ value == 42 ]"),
+            printTest(NumericValue(Seq.empty, Some(BigDecimal(0))), "number ?= 0"),
+            printTest(NumericValue(Seq(NumericConstraint.Integer), Some(BigDecimal(42))), "number [ integer ] ?= 42")
         ),
         suite("Binary with constraints")(
             printTest(BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64)), "binary [ encoding = 'base64' ]"),
@@ -101,6 +88,29 @@ object SchemaSerializationSpec extends ZIOSpecDefault:
                 "object with mandatory and optional fields"
             ),
             roundTripTest(MapValue(NumericValue()), "map with numeric values"),
-            roundTripTest(TupleValue(TextValue(), NumericValue(), BooleanValue()), "tuple")
+            roundTripTest(TupleValue(TextValue(), NumericValue(), BooleanValue()), "tuple"),
+            roundTripTest(TextValue(Seq.empty, Some("default")), "text with default"),
+            roundTripTest(TextValue(Seq(textLength <= 100), Some("default")), "text with constraints and default"),
+            roundTripTest(NumericValue(Seq.empty, Some(BigDecimal(0))), "number with default"),
+            roundTripTest(NumericValue(Seq(NumericConstraint.Integer), Some(BigDecimal(42))), "number with constraints and default")
         )
     )
+
+    // ------------------------------------------------------------------------
+
+    def print(schema: Schema): Either[String, String] =
+        SchemaSyntax.items.printString(schema).left.map(_.toString)
+
+    def roundTrip(schema: Schema): Either[String, Schema] =
+        for
+            printed <- print(schema)
+            parsed  <- SchemaLoader.parseSchema(s"= $printed").flatMap(_.getRootSchema)
+        yield parsed
+
+    def printTest(schema: Schema, expectedOutput: String) =
+        test(s"print: $expectedOutput"):
+            assertTrue(print(schema) == Right(expectedOutput))
+
+    def roundTripTest(schema: Schema, description: String) =
+        test(s"roundtrip: $description"):
+            assertTrue(roundTrip(schema) == Right(schema))

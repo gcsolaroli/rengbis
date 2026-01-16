@@ -56,11 +56,21 @@ object SchemaSyntax:
             <> regexTextConstraint.as[TextConstraint.Constraint] { case r: TextConstraint.Regex => r }.+
             <> formatTextConstraint.as[TextConstraint.Constraint] { case f: TextConstraint.Format => f }.+
 
+    val textConstraintBlock: SchemaSyntax[Chunk[TextConstraint.Constraint]] = (
+        whitespaces ~ Syntax.char('[') ~ whitespaces ~> textConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')
+    ).transform(_.flatten, Chunk(_))
+
+    val textDefaultValue: SchemaSyntax[String] = whitespaces ~ Syntax.string("?=", ()) ~ whitespaces ~> quotedString
+
     val textValue: SchemaSyntax[Schema.TextValue] = (
-        Syntax.string("text", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> textConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
+        Syntax.string("text", ()) ~ textConstraintBlock.optional ~ textDefaultValue.optional
     ).transform(
-        constraints => TextValue(constraints.map(_.flatMap(identity)).getOrElse(Chunk()).toList*),
-        textValue => if textValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(textValue.constraints)))
+        { case (constraints, default) => TextValue(constraints.getOrElse(Chunk()).toSeq, default) },
+        textValue =>
+            (
+                if textValue.constraints.isEmpty then None else Some(Chunk.fromIterable(textValue.constraints)),
+                textValue.default
+            )
     )
 
     val anyValue: SchemaSyntax[Schema.AnyValue]             = Syntax.string("any", Schema.AnyValue())
@@ -86,11 +96,21 @@ object SchemaSyntax:
         valueNumericConstraints.asChunkOf[NumericConstraint.Constraint] { case v: NumericConstraint.Value => v }
             <> integerConstraint.as[NumericConstraint.Constraint] { case NumericConstraint.Integer => NumericConstraint.Integer }.+
 
+    val numericConstraintBlock: SchemaSyntax[Chunk[NumericConstraint.Constraint]] = (
+        whitespaces ~ Syntax.char('[') ~ whitespaces ~> numericConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')
+    ).transform(_.flatten, groupNumericConstraints(_))
+
+    val numericDefaultValue: SchemaSyntax[BigDecimal] = whitespaces ~ Syntax.string("?=", ()) ~ whitespaces ~> decimalNumber
+
     val numericValue: SchemaSyntax[Schema.NumericValue] = (
-        Syntax.string("number", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> numericConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
+        Syntax.string("number", ()) ~ numericConstraintBlock.optional ~ numericDefaultValue.optional
     ).transform(
-        constraints => NumericValue(constraints.map(_.flatMap(identity)).getOrElse(Chunk()).toList*),
-        numericValue => if numericValue.constraints.isEmpty then None else Some(groupNumericConstraints(numericValue.constraints.toSeq))
+        { case (constraints, default) => NumericValue(constraints.getOrElse(Chunk()).toSeq, default) },
+        numericValue =>
+            (
+                if numericValue.constraints.isEmpty then None else Some(Chunk.fromIterable(numericValue.constraints)),
+                numericValue.default
+            )
     )
 
     val binaryToTextEncoder: SchemaSyntax[BinaryConstraint.BinaryToTextEncoder] =

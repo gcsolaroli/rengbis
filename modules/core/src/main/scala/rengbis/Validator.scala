@@ -39,6 +39,11 @@ object Validator:
         case Left(message) => ValidationResult.reportError(message)
         case Right(value)  => validateValue(schema, value)
 
+    private def hasDefault(schema: Schema): Boolean = schema match
+        case TextValue(_, default)    => default.isDefined
+        case NumericValue(_, default) => default.isDefined
+        case _                        => false
+
     // ========================================================================
 
     def formatToRegex(format: String): scala.util.matching.Regex =
@@ -80,20 +85,20 @@ object Validator:
             case ListConstraint.UniqueByFields(fields) => validateUniquenessBy(list, fields, itemSchema)
 
     private def normalizeValueForUniquenessComparison(value: Value, schema: Schema): Option[Any] = schema match
-        case NumericValue(_*) =>
+        case NumericValue(_, _) =>
             value match
                 case Value.NumberValue(v) => Some(v)
                 case Value.TextValue(v)   => Try(BigDecimal(v)).toOption
                 case _                    => None
-        case TextValue(_*)    =>
+        case TextValue(_, _)    =>
             value match
                 case Value.TextValue(v) => Some(v)
                 case _                  => None
-        case BooleanValue()   =>
+        case BooleanValue()     =>
             value match
                 case Value.BooleanValue(v) => Some(v)
                 case _                     => None
-        case _                => extractSimpleKey(value)
+        case _                  => extractSimpleKey(value)
 
     private def extractSimpleKey(value: Value): Option[Any] = value match
         case Value.TextValue(v)    => Some(v)
@@ -228,7 +233,7 @@ object Validator:
             value match
                 case Value.BooleanValue(value) => ValidationResult.valid
                 case _                         => ValidationResult.reportError(s"expected boolean value; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case TextValue(constraints*)         =>
+        case TextValue(constraints, _)       =>
             value match
                 case Value.TextValue(text) => ValidationResult.summarize(constraints.map(c => validateTextConstraints(c, text)))
                 case _                     => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
@@ -236,7 +241,7 @@ object Validator:
             value match
                 case Value.TextValue(value) => if (value == givenValue) then ValidationResult.valid else ValidationResult.reportError(s"expected value '${ givenValue }', found '${ value }'")
                 case _                      => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case NumericValue(constraints*)      =>
+        case NumericValue(constraints, _)    =>
             value match
                 case Value.NumberValue(numValue) => ValidationResult.summarize(constraints.map(c => validateNumericConstraints(c, numValue)))
                 case Value.TextValue(textValue)  =>
@@ -289,7 +294,9 @@ object Validator:
                                 .get(l.label)
                                 .map(v => validateValue(s, v))
                                 .getOrElse(l match
-                                    case MandatoryLabel(label) => ValidationResult.reportError(s"Value is missing expected key ${ label }")
+                                    case MandatoryLabel(label) =>
+                                        if hasDefault(s) then ValidationResult.valid
+                                        else ValidationResult.reportError(s"Value is missing expected key ${ label }")
                                     case OptionalLabel(label)  => ValidationResult.valid)
                         )
                     )

@@ -15,505 +15,551 @@ object ValidatorSpec extends ZIOSpecDefault:
 
     def parse(text: String): Either[String, Schema.Schema] = SchemaLoader.parseSchema(text).map(s => s.root.get)
 
-    def spec = suite("Validator features")(
-        test("any type accepts all values"):
-            val schemaDefinition = """= any"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """true""").isValid),
-                        assertTrue(validateJsonString(schema, """false""").isValid),
-                        assertTrue(validateJsonString(schema, """"hello"""").isValid),
-                        assertTrue(validateJsonString(schema, """42""").isValid),
-                        assertTrue(validateJsonString(schema, """3.14""").isValid),
-                        assertTrue(validateJsonString(schema, """null""").isValid),
-                        assertTrue(validateJsonString(schema, """[]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo", 123]""").isValid),
-                        assertTrue(validateJsonString(schema, """{}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"key": "value", "num": 42}""").isValid)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("any type in object field"):
-            val schemaDefinition = """= { name: text, data: any }"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """{"name": "test", "data": true}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"name": "test", "data": 42}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"name": "test", "data": "hello"}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"name": "test", "data": [1, 2, 3]}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"name": "test", "data": {"nested": "object"}}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"name": "test", "data": null}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"name": 41, "data": null}""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("any type in list"):
-            val schemaDefinition = """= any*"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[]""").isValid),
-                        assertTrue(validateJsonString(schema, """[1, "two", true, null, {"key": "value"}]""").isValid)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("trivial Yaml values"):
-            allSuccesses(parse("""= "yes" | "no" """) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateYamlString(schema, "yes").isValid),
-                        assertTrue(validateYamlString(schema, "no").isValid),
-                        assertTrue(validateYamlString(schema, "🤷‍♂️").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("simple JSON/Yaml/XML values"):
-            val schemaDefinition = """
-= {
-	name: text
-	age: number
-	hobbies: text*
-}"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        //  JSON
-                        assertTrue(validateJsonString(schema, """{"name": "John", "age":  30 ,     "hobbies": ["reading", "hiking"]}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"name": "John", "age": "30",     "hobbies": ["reading", "hiking"]}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"name": "John", "age": "thirty", "hobbies": ["reading", "hiking"]}""").isValid == false),
+    def spec = suite("Validator")(
+        suite("Any type")(
+            test("accepts all values"):
+                val schemaDefinition = """= any"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """true""").isValid),
+                            assertTrue(validateJsonString(schema, """false""").isValid),
+                            assertTrue(validateJsonString(schema, """"hello"""").isValid),
+                            assertTrue(validateJsonString(schema, """42""").isValid),
+                            assertTrue(validateJsonString(schema, """3.14""").isValid),
+                            assertTrue(validateJsonString(schema, """null""").isValid),
+                            assertTrue(validateJsonString(schema, """[]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo", 123]""").isValid),
+                            assertTrue(validateJsonString(schema, """{}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"key": "value", "num": 42}""").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("in object field"):
+                val schemaDefinition = """= { name: text, data: any }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """{"name": "test", "data": true}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "test", "data": 42}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "test", "data": "hello"}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "test", "data": [1, 2, 3]}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "test", "data": {"nested": "object"}}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "test", "data": null}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": 41, "data": null}""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("in list"):
+                val schemaDefinition = """= any*"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[]""").isValid),
+                            assertTrue(validateJsonString(schema, """[1, "two", true, null, {"key": "value"}]""").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+        ),
+        suite("Basic validation")(
+            test("trivial Yaml values"):
+                allSuccesses(parse("""= "yes" | "no" """) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateYamlString(schema, "yes").isValid),
+                            assertTrue(validateYamlString(schema, "no").isValid),
+                            assertTrue(validateYamlString(schema, "🤷‍♂️").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("simple JSON/Yaml/XML values"):
+                val schemaDefinition = """= {
+                                            name: text
+                                            age: number
+                                            hobbies: text*
+                                        }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            //  JSON
+                            assertTrue(validateJsonString(schema, """{"name": "John", "age":  30 ,     "hobbies": ["reading", "hiking"]}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "John", "age": "30",     "hobbies": ["reading", "hiking"]}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "John", "age": "thirty", "hobbies": ["reading", "hiking"]}""").isValid == false),
 
-                        //  Yaml
-                        assertTrue(validateYamlString(schema, "name: John\nage:   30      \nhobbies:\n  - reading\n  - hiking").isValid),
-                        assertTrue(validateYamlString(schema, "name: John\nage: \"30\"    \nhobbies:\n  - reading\n  - hiking").isValid),
-                        assertTrue(validateYamlString(schema, "name: John\nage: \"thirty\"\nhobbies:\n  - reading\n  - hiking").isValid == false),
+                            //  Yaml
+                            assertTrue(validateYamlString(schema, "name: John\nage:   30      \nhobbies:\n  - reading\n  - hiking").isValid),
+                            assertTrue(validateYamlString(schema, "name: John\nage: \"30\"    \nhobbies:\n  - reading\n  - hiking").isValid),
+                            assertTrue(validateYamlString(schema, "name: John\nage: \"thirty\"\nhobbies:\n  - reading\n  - hiking").isValid == false),
 
-                        //  XML
-                        assertTrue(validateXmlString(schema, "<root><name>John</name><age>30    </age><hobbies>reading</hobbies><hobbies>hiking</hobbies></root>").isValid),
-                        assertTrue(validateXmlString(schema, "<root><name>John</name><age>thirty</age><hobbies>reading</hobbies><hobbies>hiking</hobbies></root>").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("simple values with optional keys"):
-            val schemaDefinition = """
-= {
-	name: text
-	age?: number
-	hobbies: text*
-}"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateYamlString(schema, "name: John\nage:    30  \nhobbies:\n  - reading\n  - hiking").isValid),
-                        assertTrue(validateYamlString(schema, "name: John\n            \nhobbies:\n  - reading\n  - hiking").isValid)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("simple values with extra keys"):
-            val schemaDefinition = """
-= {
-	name: text
-	age?: number
-}"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateYamlString(schema, "name: John\nage:    30  \nhobbies:\n  - reading\n  - hiking").isValid),
-                        assertTrue(validateYamlString(schema, "name: John\n           \n").isValid)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("text constraints (minLength, maxLength)"):
-            val schemaDefinition = """= text [ 10 <= length <= 100 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateYamlString(schema, "Joe Clipperz").isValid),
-                        assertTrue(validateYamlString(schema, "Joe").isValid == false),
-                        assertTrue(validateYamlString(schema, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore.").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("text constraints (regex)"):
-            val schemaDefinition = """= text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})" ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateYamlString(schema, "2004-01-20").isValid),
-                        assertTrue(validateYamlString(schema, "Joe").isValid == false),
-                        assertTrue(validateYamlString(schema, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore.").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("text constraints (regex) with also length constraint"):
-            val schemaDefinition = """= text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateYamlString(schema, "2004-01-20").isValid),
-                        assertTrue(validateYamlString(schema, "Joe").isValid == false),
-                        assertTrue(validateYamlString(schema, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore.").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("text constraints (email regex)"):
-            // val schemaDefinition ="""= text [ regex = "/^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/" ]"""
-            val schemaDefinition = """= text [ regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateYamlString(schema, "joe@example.com").isValid),
-                        assertTrue(validateYamlString(schema, "joe@example").isValid == false),
-                        assertTrue(validateYamlString(schema, "joe.example.com").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("text patterns"):
-            val schemaDefinition = """= text [ pattern = "{###-###-####}" ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateString(schema, "{123-456-7890}").isValid),
-                        assertTrue(validateString(schema, "joe@example").isValid == false),
-                        assertTrue(validateString(schema, "joe.example.com").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list constraints `*`"):
-            val schemaDefinition = """= text*"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list constraints `+`"):
-            val schemaDefinition = """= text+"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[]""").isValid == false),
-                        assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list constraints `size == 1`"):
-            val schemaDefinition = """= text* [ size == 1 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[]""").isValid == false),
-                        assertTrue(validateJsonString(schema, """["foo"]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list constraints `2 <= size <= 3`"):
-            val schemaDefinition = """= text* [ 2 <= size <= 3 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[]""").isValid == false),
-                        assertTrue(validateJsonString(schema, """["foo"]""").isValid == false),
-                        assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo", "bar", "tik"]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo", "bar", "tik", "tak"]""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("comments"):
-            val schemaDefinition = """
-# This is a comment at the top
-= {
-    name: text    # inline comment after field
-    age: number
-    # comment on its own line
-    hobbies: text*
-}
-# trailing comment
-"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """{"name": "John", "age": 30, "hobbies": ["reading"]}""").isValid)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("number constraints (integer)"):
-            val schemaDefinition = """= number [ integer ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, "42").isValid),
-                        assertTrue(validateJsonString(schema, "-10").isValid),
-                        assertTrue(validateJsonString(schema, "0").isValid),
-                        assertTrue(validateJsonString(schema, "3.14").isValid == false),
-                        assertTrue(validateJsonString(schema, "0.5").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("number constraints (min value)"):
-            val schemaDefinition = """= number [ value >= 0 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, "0").isValid),
-                        assertTrue(validateJsonString(schema, "100").isValid),
-                        assertTrue(validateJsonString(schema, "0.5").isValid),
-                        assertTrue(validateJsonString(schema, "-1").isValid == false),
-                        assertTrue(validateJsonString(schema, "-0.001").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("number constraints (min value) - exclusive"):
-            val schemaDefinition = """= number [ value > 0 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, "0").isValid == false),
-                        assertTrue(validateJsonString(schema, "100").isValid),
-                        assertTrue(validateJsonString(schema, "0.5").isValid),
-                        assertTrue(validateJsonString(schema, "-1").isValid == false),
-                        assertTrue(validateJsonString(schema, "-0.001").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("number constraints (max value)"):
-            val schemaDefinition = """= number [ value <= 100 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, "100").isValid),
-                        assertTrue(validateJsonString(schema, "0").isValid),
-                        assertTrue(validateJsonString(schema, "-50").isValid),
-                        assertTrue(validateJsonString(schema, "101").isValid == false),
-                        assertTrue(validateJsonString(schema, "100.001").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("number constraints (range)"):
-            val schemaDefinition = """= number [ 0 <= value <= 100 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, "0").isValid),
-                        assertTrue(validateJsonString(schema, "50").isValid),
-                        assertTrue(validateJsonString(schema, "100").isValid),
-                        assertTrue(validateJsonString(schema, "-1").isValid == false),
-                        assertTrue(validateJsonString(schema, "101").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("number constraints (exact value)"):
-            val schemaDefinition = """= number [ value == 42 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, "42").isValid),
-                        assertTrue(validateJsonString(schema, "41").isValid == false),
-                        assertTrue(validateJsonString(schema, "43").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("number constraints (combined integer and range)"):
-            val schemaDefinition = """= number [ integer, 1 <= value <= 12 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, "1").isValid),
-                        assertTrue(validateJsonString(schema, "6").isValid),
-                        assertTrue(validateJsonString(schema, "12").isValid),
-                        assertTrue(validateJsonString(schema, "0").isValid == false),
-                        assertTrue(validateJsonString(schema, "13").isValid == false),
-                        assertTrue(validateJsonString(schema, "6.5").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("number constraints (negative values)"):
-            val schemaDefinition = """= number [ value >= -10 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, "-10").isValid),
-                        assertTrue(validateJsonString(schema, "-5").isValid),
-                        assertTrue(validateJsonString(schema, "0").isValid),
-                        assertTrue(validateJsonString(schema, "-11").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("number constraints (decimal bounds)"):
-            val schemaDefinition = """= number [ value >= 0.5 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, "0.5").isValid),
-                        assertTrue(validateJsonString(schema, "1").isValid),
-                        assertTrue(validateJsonString(schema, "0.49").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list uniqueness constraint (simple text values)"):
-            val schemaDefinition = """= text* [ unique ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo"]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo", "bar", "baz"]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo", "bar", "foo"]""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list uniqueness constraint (simple number values)"):
-            val schemaDefinition = """= number+ [ unique ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[1, 2, 3]""").isValid),
-                        assertTrue(validateJsonString(schema, """[1, 2, 1]""").isValid == false),
-                        assertTrue(validateJsonString(schema, """[]""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list uniqueness constraint (object with single field key)"):
-            val schemaDefinition = """= { id: text, name: text }* [ unique = id ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "2", "name": "Bob"}]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "2", "name": "Alice"}]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "1", "name": "Bob"}]""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list uniqueness constraint (object with composite key)"):
-            val schemaDefinition = """= { id: text, name: text }* [ unique = (id, name) ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "1", "name": "Bob"}]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "2", "name": "Alice"}]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "1", "name": "Alice"}]""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list uniqueness constraint (multiple independent constraints)"):
-            val schemaDefinition = """= { id: text, code: text, name: text }* [ unique = id, unique = code ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """[]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "code": "A", "name": "Alice"}]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "code": "A", "name": "Alice"}, {"id": "2", "code": "B", "name": "Bob"}]""").isValid),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "code": "A", "name": "Alice"}, {"id": "1", "code": "B", "name": "Bob"}]""").isValid == false),
-                        assertTrue(validateJsonString(schema, """[{"id": "1", "code": "A", "name": "Alice"}, {"id": "2", "code": "A", "name": "Bob"}]""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list uniqueness constraint combined with size constraint"):
-            val schemaDefinition = """= text* [ unique, 2 <= size <= 5 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo", "bar", "baz"]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo"]""").isValid == false),
-                        assertTrue(validateJsonString(schema, """["foo", "bar", "foo"]""").isValid == false),
-                        assertTrue(validateJsonString(schema, """["a", "b", "c", "d", "e", "f"]""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("list size constraint only"):
-            val schemaDefinition = """= text* [ 2 <= size <= 5 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo", "bar", "baz"]""").isValid),
-                        assertTrue(validateJsonString(schema, """["foo"]""").isValid == false),
-                        assertTrue(validateJsonString(schema, """["a", "b", "c", "d", "e", "f"]""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("binary without encoding accepts any text"):
-            val schemaDefinition = """= binary"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
-                        assertTrue(validateJsonString(schema, """"any random text"""").isValid),
-                        assertTrue(validateJsonString(schema, """"not valid base64!!!"""").isValid)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("binary with base64 encoding validates encoding"):
-            val schemaDefinition = """= binary [ encoding = 'base64' ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
-                        assertTrue(validateJsonString(schema, """""""").isValid),
-                        assertTrue(validateJsonString(schema, """"not valid base64!!!"""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("binary with hex encoding validates encoding"):
-            val schemaDefinition = """= binary [ encoding = 'hex' ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """"48656c6c6f"""").isValid),
-                        assertTrue(validateJsonString(schema, """""""").isValid),
-                        assertTrue(validateJsonString(schema, """"48 65 6c 6c 6f"""").isValid),
-                        assertTrue(validateJsonString(schema, """"48656c6c6"""").isValid == false),
-                        assertTrue(validateJsonString(schema, """"ZZZZ"""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("binary with base64 encoding and size constraint"):
-            val schemaDefinition = """= binary [ encoding = 'base64', bytes == 11 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
-                        assertTrue(validateJsonString(schema, """"SGVsbG8="""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("binary with size range constraint"):
-            val schemaDefinition = """= binary [ encoding = 'base64', 5 <= bytes <= 20 ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
-                        assertTrue(validateJsonString(schema, """"SGk="""").isValid == false),
-                        assertTrue(validateJsonString(schema, """"VGhpcyBpcyBhIHZlcnkgbG9uZyBzdHJpbmcgdGhhdCBpcyB0b28gYmlnIQ=="""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("binary in object field"):
-            val schemaDefinition = """= { name: text, data: binary [ encoding = 'base64' ] }"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """{"name": "test", "data": "SGVsbG8="}""").isValid),
-                        assertTrue(validateJsonString(schema, """{"name": "test", "data": "!!!invalid!!!"}""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
-        ,
-        test("binary with base32 encoding"):
-            val schemaDefinition = """= binary [ encoding = 'base32' ]"""
-            allSuccesses(parse(schemaDefinition) match
-                case Right(schema) =>
-                    allSuccesses(
-                        assertTrue(validateJsonString(schema, """"JBSWY3DPEHPK3PXP"""").isValid),
-                        assertTrue(validateJsonString(schema, """"12345678"""").isValid == false)
-                    )
-                case Left(value)   => assertTrue(value == ""))
+                            //  XML
+                            assertTrue(validateXmlString(schema, "<root><name>John</name><age>30    </age><hobbies>reading</hobbies><hobbies>hiking</hobbies></root>").isValid),
+                            assertTrue(validateXmlString(schema, "<root><name>John</name><age>thirty</age><hobbies>reading</hobbies><hobbies>hiking</hobbies></root>").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("optional keys"):
+                val schemaDefinition = """= {
+                                            name: text
+                                            age?: number
+                                            hobbies: text*
+                                        }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateYamlString(schema, "name: John\nage:    30  \nhobbies:\n  - reading\n  - hiking").isValid),
+                            assertTrue(validateYamlString(schema, "name: John\n            \nhobbies:\n  - reading\n  - hiking").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("extra keys are allowed"):
+                val schemaDefinition = """= {
+                                            name: text
+                                            age?: number
+                                        }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateYamlString(schema, "name: John\nage:    30  \nhobbies:\n  - reading\n  - hiking").isValid),
+                            assertTrue(validateYamlString(schema, "name: John\n           \n").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("comments in schema"):
+                val schemaDefinition = """
+                    |# This is a comment at the top
+                    |= {
+                    |    name: text    # inline comment after field
+                    |    age: number
+                    |    # comment on its own line
+                    |    hobbies: text*
+                    |}
+                    |# trailing comment
+                    |""".stripMargin
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """{"name": "John", "age": 30, "hobbies": ["reading"]}""").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+        ),
+        suite("Text constraints")(
+            test("length range"):
+                val schemaDefinition = """= text [ 10 <= length <= 100 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateYamlString(schema, "Joe Clipperz").isValid),
+                            assertTrue(validateYamlString(schema, "Joe").isValid == false),
+                            assertTrue(validateYamlString(schema, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore.").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("regex"):
+                val schemaDefinition = """= text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})" ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateYamlString(schema, "2004-01-20").isValid),
+                            assertTrue(validateYamlString(schema, "Joe").isValid == false),
+                            assertTrue(validateYamlString(schema, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore.").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("regex with length constraint"):
+                val schemaDefinition = """= text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateYamlString(schema, "2004-01-20").isValid),
+                            assertTrue(validateYamlString(schema, "Joe").isValid == false),
+                            assertTrue(validateYamlString(schema, "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore.").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("email regex"):
+                val schemaDefinition = """= text [ regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateYamlString(schema, "joe@example.com").isValid),
+                            assertTrue(validateYamlString(schema, "joe@example").isValid == false),
+                            assertTrue(validateYamlString(schema, "joe.example.com").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("pattern"):
+                val schemaDefinition = """= text [ pattern = "{###-###-####}" ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateString(schema, "{123-456-7890}").isValid),
+                            assertTrue(validateString(schema, "joe@example").isValid == false),
+                            assertTrue(validateString(schema, "joe.example.com").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+        ),
+        suite("Number constraints")(
+            test("integer"):
+                val schemaDefinition = """= number [ integer ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, "42").isValid),
+                            assertTrue(validateJsonString(schema, "-10").isValid),
+                            assertTrue(validateJsonString(schema, "0").isValid),
+                            assertTrue(validateJsonString(schema, "3.14").isValid == false),
+                            assertTrue(validateJsonString(schema, "0.5").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("min value (inclusive)"):
+                val schemaDefinition = """= number [ value >= 0 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, "0").isValid),
+                            assertTrue(validateJsonString(schema, "100").isValid),
+                            assertTrue(validateJsonString(schema, "0.5").isValid),
+                            assertTrue(validateJsonString(schema, "-1").isValid == false),
+                            assertTrue(validateJsonString(schema, "-0.001").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("min value (exclusive)"):
+                val schemaDefinition = """= number [ value > 0 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, "0").isValid == false),
+                            assertTrue(validateJsonString(schema, "100").isValid),
+                            assertTrue(validateJsonString(schema, "0.5").isValid),
+                            assertTrue(validateJsonString(schema, "-1").isValid == false),
+                            assertTrue(validateJsonString(schema, "-0.001").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("max value"):
+                val schemaDefinition = """= number [ value <= 100 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, "100").isValid),
+                            assertTrue(validateJsonString(schema, "0").isValid),
+                            assertTrue(validateJsonString(schema, "-50").isValid),
+                            assertTrue(validateJsonString(schema, "101").isValid == false),
+                            assertTrue(validateJsonString(schema, "100.001").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("range"):
+                val schemaDefinition = """= number [ 0 <= value <= 100 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, "0").isValid),
+                            assertTrue(validateJsonString(schema, "50").isValid),
+                            assertTrue(validateJsonString(schema, "100").isValid),
+                            assertTrue(validateJsonString(schema, "-1").isValid == false),
+                            assertTrue(validateJsonString(schema, "101").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("exact value"):
+                val schemaDefinition = """= number [ value == 42 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, "42").isValid),
+                            assertTrue(validateJsonString(schema, "41").isValid == false),
+                            assertTrue(validateJsonString(schema, "43").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("combined integer and range"):
+                val schemaDefinition = """= number [ integer, 1 <= value <= 12 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, "1").isValid),
+                            assertTrue(validateJsonString(schema, "6").isValid),
+                            assertTrue(validateJsonString(schema, "12").isValid),
+                            assertTrue(validateJsonString(schema, "0").isValid == false),
+                            assertTrue(validateJsonString(schema, "13").isValid == false),
+                            assertTrue(validateJsonString(schema, "6.5").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("negative values"):
+                val schemaDefinition = """= number [ value >= -10 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, "-10").isValid),
+                            assertTrue(validateJsonString(schema, "-5").isValid),
+                            assertTrue(validateJsonString(schema, "0").isValid),
+                            assertTrue(validateJsonString(schema, "-11").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("decimal bounds"):
+                val schemaDefinition = """= number [ value >= 0.5 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, "0.5").isValid),
+                            assertTrue(validateJsonString(schema, "1").isValid),
+                            assertTrue(validateJsonString(schema, "0.49").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+        ),
+        suite("List constraints")(
+            test("zero or more (*)"):
+                val schemaDefinition = """= text*"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("one or more (+)"):
+                val schemaDefinition = """= text+"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("exact size"):
+                val schemaDefinition = """= text* [ size == 1 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """["foo"]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("size range"):
+                val schemaDefinition = """= text* [ 2 <= size <= 3 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """["foo"]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo", "bar", "tik"]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo", "bar", "tik", "tak"]""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("size constraint only"):
+                val schemaDefinition = """= text* [ 2 <= size <= 5 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo", "bar", "baz"]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo"]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """["a", "b", "c", "d", "e", "f"]""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+        ),
+        suite("List uniqueness constraints")(
+            test("simple text values"):
+                val schemaDefinition = """= text* [ unique ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo"]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo", "bar", "baz"]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo", "bar", "foo"]""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("simple number values"):
+                val schemaDefinition = """= number+ [ unique ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[1, 2, 3]""").isValid),
+                            assertTrue(validateJsonString(schema, """[1, 2, 1]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """[]""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("object with single field key"):
+                val schemaDefinition = """= { id: text, name: text }* [ unique = id ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "2", "name": "Bob"}]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "2", "name": "Alice"}]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "1", "name": "Bob"}]""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("object with composite key"):
+                val schemaDefinition = """= { id: text, name: text }* [ unique = (id, name) ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "1", "name": "Bob"}]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "2", "name": "Alice"}]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "name": "Alice"}, {"id": "1", "name": "Alice"}]""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("multiple independent constraints"):
+                val schemaDefinition = """= { id: text, code: text, name: text }* [ unique = id, unique = code ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """[]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "code": "A", "name": "Alice"}]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "code": "A", "name": "Alice"}, {"id": "2", "code": "B", "name": "Bob"}]""").isValid),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "code": "A", "name": "Alice"}, {"id": "1", "code": "B", "name": "Bob"}]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """[{"id": "1", "code": "A", "name": "Alice"}, {"id": "2", "code": "A", "name": "Bob"}]""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("combined with size constraint"):
+                val schemaDefinition = """= text* [ unique, 2 <= size <= 5 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """["foo", "bar"]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo", "bar", "baz"]""").isValid),
+                            assertTrue(validateJsonString(schema, """["foo"]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """["foo", "bar", "foo"]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """["a", "b", "c", "d", "e", "f"]""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+        ),
+        suite("Binary constraints")(
+            test("without encoding accepts any text"):
+                val schemaDefinition = """= binary"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
+                            assertTrue(validateJsonString(schema, """"any random text"""").isValid),
+                            assertTrue(validateJsonString(schema, """"not valid base64!!!"""").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("base64 encoding"):
+                val schemaDefinition = """= binary [ encoding = 'base64' ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
+                            assertTrue(validateJsonString(schema, """""""").isValid),
+                            assertTrue(validateJsonString(schema, """"not valid base64!!!"""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("hex encoding"):
+                val schemaDefinition = """= binary [ encoding = 'hex' ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """"48656c6c6f"""").isValid),
+                            assertTrue(validateJsonString(schema, """""""").isValid),
+                            assertTrue(validateJsonString(schema, """"48 65 6c 6c 6f"""").isValid),
+                            assertTrue(validateJsonString(schema, """"48656c6c6"""").isValid == false),
+                            assertTrue(validateJsonString(schema, """"ZZZZ"""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("base32 encoding"):
+                val schemaDefinition = """= binary [ encoding = 'base32' ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """"JBSWY3DPEHPK3PXP"""").isValid),
+                            assertTrue(validateJsonString(schema, """"12345678"""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("base64 with exact size"):
+                val schemaDefinition = """= binary [ encoding = 'base64', bytes == 11 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
+                            assertTrue(validateJsonString(schema, """"SGVsbG8="""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("base64 with size range"):
+                val schemaDefinition = """= binary [ encoding = 'base64', 5 <= bytes <= 20 ]"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """"SGVsbG8gV29ybGQ="""").isValid),
+                            assertTrue(validateJsonString(schema, """"SGk="""").isValid == false),
+                            assertTrue(validateJsonString(schema, """"VGhpcyBpcyBhIHZlcnkgbG9uZyBzdHJpbmcgdGhhdCBpcyB0b28gYmlnIQ=="""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("in object field"):
+                val schemaDefinition = """= { name: text, data: binary [ encoding = 'base64' ] }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """{"name": "test", "data": "SGVsbG8="}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "test", "data": "!!!invalid!!!"}""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+        ),
+        suite("Default values")(
+            test("missing field with default is valid"):
+                val schemaDefinition = """= { name: text, status: text ?= "active" }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """{"name": "John", "status": "inactive"}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "John"}""").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("missing field without default is invalid"):
+                val schemaDefinition = """= { name: text, status: text }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """{"name": "John", "status": "active"}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "John"}""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("numeric field with default"):
+                val schemaDefinition = """= { name: text, count: number [ integer ] ?= 0 }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """{"name": "John", "count": 5}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "John"}""").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("provided value must still match constraints"):
+                val schemaDefinition = """= { status: text [ length <= 10 ] ?= "active" }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """{"status": "ok"}""").isValid),
+                            assertTrue(validateJsonString(schema, """{}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"status": "this is way too long"}""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+        )
     )
