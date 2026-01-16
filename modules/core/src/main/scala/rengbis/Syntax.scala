@@ -3,7 +3,7 @@ package rengbis
 import zio.Chunk
 import zio.parser.{ AnySyntaxOps, Parser, ParserOps, Printer, StringErrSyntaxOps, StringParserError, Syntax, SyntaxOps }
 import Schema.{ AlternativeValues, BinaryValue, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue }
-import Schema.{ BinaryConstraint, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint }
+import Schema.{ BinaryConstraint, BoundConstraint, BoundOp, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint }
 
 object SchemaSyntax:
     type SchemaSyntax[A] = zio.parser.Syntax[String, Char, Char, A]
@@ -43,45 +43,62 @@ object SchemaSyntax:
             <> Syntax.string(">", ExtendedSizeConstraint.GT)
             <> smallerSizeConstrint.widen[SizeConstraint]
 
-    val sizeTextConstraints: SchemaSyntax[Chunk[TextConstraint.TextSizeConstraint]] = (
-        Syntax.string("length", ()) ~ whitespaces ~ sizeConstraint ~ whitespaces ~ number
-    ).transform(
-        (c, n) =>
-            Chunk(
-                c match
-                    case ExtendedSizeConstraint.EQ => TextConstraint.Length(n)
-                    case ExtendedSizeConstraint.GT => TextConstraint.MinLength(n + 1)
-                    case ExtendedSizeConstraint.GE => TextConstraint.MinLength(n)
-                    case SmallerSizeConstraint.LT  => TextConstraint.MaxLength(n - 1)
-                    case SmallerSizeConstraint.LE  => TextConstraint.MaxLength(n)
-            ),
-        c =>
-            c.head match
-                case TextConstraint.Length(l)    => (ExtendedSizeConstraint.EQ, l)
-                case TextConstraint.MinLength(l) => (ExtendedSizeConstraint.GE, l)
-                case TextConstraint.MaxLength(l) => (SmallerSizeConstraint.LE, l)
-    )
-        <> (
-            number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("length", ()) ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ number
-        ).transform(
-            (l, lc, uc, u) =>
-                (lc, uc) match
-                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LT) => Chunk(TextConstraint.MinLength(l + 1), TextConstraint.MaxLength(u - 1))
-                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LE) => Chunk(TextConstraint.MinLength(l + 1), TextConstraint.MaxLength(u))
-                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LT) => Chunk(TextConstraint.MinLength(l), TextConstraint.MaxLength(u - 1))
-                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LE) => Chunk(TextConstraint.MinLength(l), TextConstraint.MaxLength(u))
+    def boundConstraintSyntax[K, V](
+        keySyntax: SchemaSyntax[K],
+        valueSyntax: SchemaSyntax[V]
+    ): SchemaSyntax[Chunk[(K, BoundConstraint[V])]] =
+        // Form 1: key op value (e.g., "length >= 5")
+        (keySyntax ~ whitespaces ~ sizeConstraint ~ whitespaces ~ valueSyntax).transform(
+            (k, c, v) =>
+                val op = c match
+                    case ExtendedSizeConstraint.EQ => BoundOp.Exact
+                    case ExtendedSizeConstraint.GT => BoundOp.MinExclusive
+                    case ExtendedSizeConstraint.GE => BoundOp.MinInclusive
+                    case SmallerSizeConstraint.LT  => BoundOp.MaxExclusive
+                    case SmallerSizeConstraint.LE  => BoundOp.MaxInclusive
+                Chunk((k, BoundConstraint(op, v)))
             ,
-            c => (c.head.size, SmallerSizeConstraint.LE, SmallerSizeConstraint.LE, c.tail.head.size)
+            c =>
+                val (k, bound) = c.head
+                val op         = bound.op match
+                    case BoundOp.Exact        => ExtendedSizeConstraint.EQ
+                    case BoundOp.MinInclusive => ExtendedSizeConstraint.GE
+                    case BoundOp.MinExclusive => ExtendedSizeConstraint.GT
+                    case BoundOp.MaxInclusive => SmallerSizeConstraint.LE
+                    case BoundOp.MaxExclusive => SmallerSizeConstraint.LT
+                (k, op, bound.value)
         )
-        <> (
-            number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("length", ())
-        ).transform(
-            (l, lc) =>
-                lc match
-                    case SmallerSizeConstraint.LT => Chunk(TextConstraint.MinLength(l + 1))
-                    case SmallerSizeConstraint.LE => Chunk(TextConstraint.MinLength(l))
-            ,
-            c => (c.head.size, SmallerSizeConstraint.LE)
+        // Form 2: value op key op value (e.g., "5 <= length <= 10")
+            <> (valueSyntax ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ keySyntax ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ valueSyntax)
+                .transform(
+                    (lo, lc, k, uc, up) =>
+                        val minOp = if lc == SmallerSizeConstraint.LT then BoundOp.MinExclusive else BoundOp.MinInclusive
+                        val maxOp = if uc == SmallerSizeConstraint.LT then BoundOp.MaxExclusive else BoundOp.MaxInclusive
+                        Chunk((k, BoundConstraint(minOp, lo)), (k, BoundConstraint(maxOp, up)))
+                    ,
+                    c =>
+                        val (k, minBound) = c.find((_, b) => b.isMinInclusive || b.isMinExclusive).get
+                        val (_, maxBound) = c.find((_, b) => b.isMaxInclusive || b.isMaxExclusive).get
+                        val minOp         = if minBound.isMinExclusive then SmallerSizeConstraint.LT else SmallerSizeConstraint.LE
+                        val maxOp         = if maxBound.isMaxExclusive then SmallerSizeConstraint.LT else SmallerSizeConstraint.LE
+                        (minBound.value, minOp, k, maxOp, maxBound.value)
+                )
+            // Form 3: value op key (e.g., "5 <= length")
+            <> (valueSyntax ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ keySyntax).transform(
+                (v, lc, k) =>
+                    val op = if lc == SmallerSizeConstraint.LT then BoundOp.MinExclusive else BoundOp.MinInclusive
+                    Chunk((k, BoundConstraint(op, v)))
+                ,
+                c =>
+                    val (k, bound) = c.head
+                    val op         = if bound.isMinExclusive then SmallerSizeConstraint.LT else SmallerSizeConstraint.LE
+                    (bound.value, op, k)
+            )
+
+    val sizeTextConstraints: SchemaSyntax[Chunk[TextConstraint.Size]] =
+        boundConstraintSyntax(Syntax.string("length", ()), number).transform(
+            bounds => bounds.map((_, b) => TextConstraint.Size(b)),
+            sizes => sizes.map(s => ((), s.bound))
         )
 
     val regexTextConstraint: SchemaSyntax[TextConstraint.Constraint] = (
@@ -123,60 +140,10 @@ object SchemaSyntax:
 
     val integerConstraint: SchemaSyntax[NumericConstraint.Constraint] = Syntax.string("integer", NumericConstraint.Integer).widen[NumericConstraint.Constraint]
 
-    val valueNumericConstraints: SchemaSyntax[Chunk[NumericConstraint.NumericValueConstraint]] = (
-        Syntax.string("value", ()) ~ whitespaces ~ sizeConstraint ~ whitespaces ~ decimalNumber
-    ).transform(
-        (c, n) =>
-            Chunk(
-                c match
-                    case ExtendedSizeConstraint.EQ => NumericConstraint.ExactValue(n)
-                    case ExtendedSizeConstraint.GT => NumericConstraint.MinValueExclusive(n)
-                    case ExtendedSizeConstraint.GE => NumericConstraint.MinValue(n)
-                    case SmallerSizeConstraint.LT  => NumericConstraint.MaxValueExclusive(n)
-                    case SmallerSizeConstraint.LE  => NumericConstraint.MaxValue(n)
-            ),
-        c =>
-            c.head match
-                case NumericConstraint.ExactValue(v)        => (ExtendedSizeConstraint.EQ, v)
-                case NumericConstraint.MinValueExclusive(v) => (ExtendedSizeConstraint.GT, v)
-                case NumericConstraint.MinValue(v)          => (ExtendedSizeConstraint.GE, v)
-                case NumericConstraint.MaxValueExclusive(v) => (SmallerSizeConstraint.LT, v)
-                case NumericConstraint.MaxValue(v)          => (SmallerSizeConstraint.LE, v)
-    )
-        <> (
-            decimalNumber ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("value", ()) ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ decimalNumber
-        ).transform(
-            (l, lc, uc, u) =>
-                (lc, uc) match
-                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LT) => Chunk(NumericConstraint.MinValueExclusive(l), NumericConstraint.MaxValueExclusive(u))
-                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LE) => Chunk(NumericConstraint.MinValueExclusive(l), NumericConstraint.MaxValue(u))
-                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LT) => Chunk(NumericConstraint.MinValue(l), NumericConstraint.MaxValueExclusive(u))
-                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LE) => Chunk(NumericConstraint.MinValue(l), NumericConstraint.MaxValue(u))
-            ,
-            c =>
-                val (minBound, minOp) = c.head match
-                    case NumericConstraint.MinValueExclusive(v) => (v, SmallerSizeConstraint.LT)
-                    case NumericConstraint.MinValue(v)          => (v, SmallerSizeConstraint.LE)
-                    case other                                  => (other.bound, SmallerSizeConstraint.LE)
-                val (maxBound, maxOp) = c.tail.head match
-                    case NumericConstraint.MaxValueExclusive(v) => (v, SmallerSizeConstraint.LT)
-                    case NumericConstraint.MaxValue(v)          => (v, SmallerSizeConstraint.LE)
-                    case other                                  => (other.bound, SmallerSizeConstraint.LE)
-                (minBound, minOp, maxOp, maxBound)
-        )
-        <> (
-            decimalNumber ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("value", ())
-        ).transform(
-            (l, lc) =>
-                lc match
-                    case SmallerSizeConstraint.LT => Chunk(NumericConstraint.MinValueExclusive(l))
-                    case SmallerSizeConstraint.LE => Chunk(NumericConstraint.MinValue(l))
-            ,
-            c =>
-                c.head match
-                    case NumericConstraint.MinValueExclusive(v) => (v, SmallerSizeConstraint.LT)
-                    case NumericConstraint.MinValue(v)          => (v, SmallerSizeConstraint.LE)
-                    case other                                  => (other.bound, SmallerSizeConstraint.LE)
+    val valueNumericConstraints: SchemaSyntax[Chunk[NumericConstraint.Value]] =
+        boundConstraintSyntax(Syntax.string("value", ()), decimalNumber).transform(
+            bounds => bounds.map((_, b) => NumericConstraint.Value(b)),
+            values => values.map(v => ((), v.bound))
         )
 
     val numericConstraints: SchemaSyntax[Chunk[NumericConstraint.Constraint]] =
@@ -211,56 +178,18 @@ object SchemaSyntax:
             <> Syntax.string("MB", BinaryConstraint.BinaryUnit.MB)
             <> Syntax.string("GB", BinaryConstraint.BinaryUnit.GB)
 
-    val sizeBinaryConstraints: SchemaSyntax[Chunk[BinaryConstraint.SizeConstraint]] = (
-        sizeBinaryUnit ~ whitespaces ~ sizeConstraint ~ whitespaces ~ number
-    ).transform(
-        (u, c, n) =>
-            Chunk(
-                c match
-                    case ExtendedSizeConstraint.EQ => BinaryConstraint.ExactSize(n, u)
-                    case ExtendedSizeConstraint.GT => BinaryConstraint.MinSize(n + 1, u)
-                    case ExtendedSizeConstraint.GE => BinaryConstraint.MinSize(n, u)
-                    case SmallerSizeConstraint.LT  => BinaryConstraint.MaxSize(n - 1, u)
-                    case SmallerSizeConstraint.LE  => BinaryConstraint.MaxSize(n, u)
-            ),
-        c =>
-            c.head match
-                case BinaryConstraint.ExactSize(s, u) => (u, ExtendedSizeConstraint.EQ, s)
-                case BinaryConstraint.MinSize(s, u)   => (u, ExtendedSizeConstraint.GE, s)
-                case BinaryConstraint.MaxSize(s, u)   => (u, SmallerSizeConstraint.LE, s)
-    )
-        <> (
-            number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ sizeBinaryUnit ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ number
-        ).transform(
-            (lo, lc, unit, uc, up) =>
-                (lc, uc) match
-                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LT) => Chunk(BinaryConstraint.MinSize(lo + 1, unit), BinaryConstraint.MaxSize(up - 1, unit))
-                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LE) => Chunk(BinaryConstraint.MinSize(lo + 1, unit), BinaryConstraint.MaxSize(up, unit))
-                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LT) => Chunk(BinaryConstraint.MinSize(lo, unit), BinaryConstraint.MaxSize(up - 1, unit))
-                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LE) => Chunk(BinaryConstraint.MinSize(lo, unit), BinaryConstraint.MaxSize(up, unit))
-            ,
-            c =>
-                val minSize = c.collectFirst { case BinaryConstraint.MinSize(s, u) => s }.getOrElse(0)
-                val maxSize = c.collectFirst { case BinaryConstraint.MaxSize(s, u) => s }.getOrElse(0)
-                val unit    = c.collectFirst { case BinaryConstraint.MaxSize(s, u) => u }.getOrElse(BinaryConstraint.BinaryUnit.bytes)
-                (minSize, SmallerSizeConstraint.LE, unit, SmallerSizeConstraint.LE, maxSize)
-        )
-        <> (
-            number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ sizeBinaryUnit
-        ).transform(
-            (l, lc, unit) =>
-                lc match
-                    case SmallerSizeConstraint.LT => Chunk(BinaryConstraint.MinSize(l + 1, unit))
-                    case SmallerSizeConstraint.LE => Chunk(BinaryConstraint.MinSize(l, unit))
-            ,
-            c =>
-                val (minSize, unit) = c.collectFirst { case BinaryConstraint.MinSize(s, u) => (s, u) }.getOrElse((0, BinaryConstraint.BinaryUnit.bytes))
-                (minSize, SmallerSizeConstraint.LE, unit)
+    val sizeBinaryConstraints: SchemaSyntax[Chunk[BinaryConstraint.Size]] =
+        boundConstraintSyntax(sizeBinaryUnit, number).transform(
+            bounds =>
+                bounds.map((unit, b) =>
+                    val normalizedValue = b.value * unit.bytes
+                    BinaryConstraint.Size(BoundConstraint(b.op, normalizedValue), BinaryConstraint.BinaryUnit.bytes)
+                ),
+            sizes => sizes.map(s => (BinaryConstraint.BinaryUnit.bytes, s.bound))
         )
 
     val binaryConstraints: SchemaSyntax[Chunk[BinaryConstraint.Constraint]] =
-        sizeBinaryConstraints.widen[Chunk[BinaryConstraint.Constraint]]
-            <> encodingConstraint.+
+        sizeBinaryConstraints.widen[Chunk[BinaryConstraint.Constraint]] <> encodingConstraint.+
 
     val binaryValue: SchemaSyntax[Schema.BinaryValue] = (
         Syntax.string("binary", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> binaryConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
@@ -363,55 +292,14 @@ object SchemaSyntax:
         c => c.fields.head
     )
 
-    val listSizeConstraints: SchemaSyntax[Chunk[ListConstraint.Constraint]] = (
-        Syntax.string("size", ()) ~ whitespaces ~ sizeConstraint ~ whitespaces ~ number
-    ).transform(
-        (c, n) =>
-            Chunk(
-                c match
-                    case ExtendedSizeConstraint.EQ => ListConstraint.ExactSize(n)
-                    case ExtendedSizeConstraint.GT => ListConstraint.MinSize(n + 1)
-                    case ExtendedSizeConstraint.GE => ListConstraint.MinSize(n)
-                    case SmallerSizeConstraint.LT  => ListConstraint.MaxSize(n - 1)
-                    case SmallerSizeConstraint.LE  => ListConstraint.MaxSize(n)
-            ),
-        c =>
-            c.head match
-                case ListConstraint.ExactSize(s) => (ExtendedSizeConstraint.EQ, s)
-                case ListConstraint.MinSize(s)   => (ExtendedSizeConstraint.GE, s)
-                case ListConstraint.MaxSize(s)   => (SmallerSizeConstraint.LE, s)
-                case _                           => (ExtendedSizeConstraint.EQ, 0)
-    )
-        <> (
-            number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("size", ()) ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ number
-        ).transform(
-            (l, lc, uc, u) =>
-                (lc, uc) match
-                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LT) => Chunk(ListConstraint.MinSize(l + 1), ListConstraint.MaxSize(u - 1))
-                    case (SmallerSizeConstraint.LT, SmallerSizeConstraint.LE) => Chunk(ListConstraint.MinSize(l + 1), ListConstraint.MaxSize(u))
-                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LT) => Chunk(ListConstraint.MinSize(l), ListConstraint.MaxSize(u - 1))
-                    case (SmallerSizeConstraint.LE, SmallerSizeConstraint.LE) => Chunk(ListConstraint.MinSize(l), ListConstraint.MaxSize(u))
-            ,
-            c =>
-                val minSize = c.collectFirst { case ListConstraint.MinSize(s) => s }.getOrElse(0)
-                val maxSize = c.collectFirst { case ListConstraint.MaxSize(s) => s }.getOrElse(0)
-                (minSize, SmallerSizeConstraint.LE, SmallerSizeConstraint.LE, maxSize)
-        )
-        <> (
-            number ~ whitespaces ~ smallerSizeConstrint ~ whitespaces ~ Syntax.string("size", ())
-        ).transform(
-            (l, lc) =>
-                lc match
-                    case SmallerSizeConstraint.LT => Chunk(ListConstraint.MinSize(l + 1))
-                    case SmallerSizeConstraint.LE => Chunk(ListConstraint.MinSize(l))
-            ,
-            c =>
-                val minSize = c.collectFirst { case ListConstraint.MinSize(s) => s }.getOrElse(0)
-                (minSize, SmallerSizeConstraint.LE)
+    val listSizeConstraints: SchemaSyntax[Chunk[ListConstraint.Size]] =
+        boundConstraintSyntax(Syntax.string("size", ()), number).transform(
+            bounds => bounds.map((_, b) => ListConstraint.Size(b)),
+            sizes => sizes.map(s => ((), s.bound))
         )
 
     val listConstraint: SchemaSyntax[Chunk[ListConstraint.Constraint]] =
-        listSizeConstraints
+        listSizeConstraints.widen[Chunk[ListConstraint.Constraint]]
             <> uniqueByFieldsConstraint.transform(c => Chunk(c), cs => cs.head.asInstanceOf[ListConstraint.UniqueByFields])
             <> uniqueByFieldConstraint.transform(c => Chunk(c), cs => cs.head.asInstanceOf[ListConstraint.UniqueByFields])
             <> uniqueConstraint.transform(c => Chunk(c), cs => cs.head)
@@ -435,11 +323,11 @@ object SchemaSyntax:
                 items => items.schema
             )
             <> ((item <~ Syntax.char('+')) ~ listConstraintBlock).transform(
-                (itemSchema, constraints) => Schema.ListOfValues(itemSchema, (ListConstraint.MinSize(1) +: constraints.toSeq)*),
-                items => (items.schema, Chunk.fromIterable(items.constraints.filterNot(_ == ListConstraint.MinSize(1))))
+                (itemSchema, constraints) => Schema.ListOfValues(itemSchema, (ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1)) +: constraints.toSeq)*),
+                items => (items.schema, Chunk.fromIterable(items.constraints.filterNot(_ == ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1)))))
             )
             <> (item <~ Syntax.char('+')).transform(
-                itemSchema => Schema.ListOfValues(itemSchema, ListConstraint.MinSize(1)),
+                itemSchema => Schema.ListOfValues(itemSchema, ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1))),
                 items => items.schema
             )
 
@@ -483,32 +371,3 @@ object SchemaSyntax:
             ~ root.optional
             ~ emptyLines ~ whitespaces) <~ Syntax.end
     )
-    // .transform(
-    //     (c, r) => c ++ r.map(rr => (ROOT_SCHEMA_KEY, rr)).toList,
-    //     xs => (xs.filter(x => !isRootSchema(x)), xs.find(isRootSchema).map(_._2))
-    // )
-
-/*
-    def parse(definition: String): Either[String, Schema] = schema
-        .parseString(definition)
-        .left
-        .map(_.pretty)
-        .flatMap(resolveReferencedSchemas)
-
-    def resolveReferencedSchemas(definitions: Chunk[(String, Schema)]): Either[String, Schema] =
-        val referencedSchemas                                = definitions.map((k, s) => (k, s, s.dependencies))
-        val (dependencyFreeSchemas_, schemaWithDependencies) = referencedSchemas.partition((k, s, d) => d.isEmpty)
-        val dependencyFreeSchemas                            = dependencyFreeSchemas_.map((k, s, d) => (k, s))
-
-        dependencyFreeSchemas.isEmpty match
-            case true  => Left(s"unresolved references: ${ schemaWithDependencies.flatMap((k, s, d) => s"'${ d }'").distinct.sorted.mkString(", ") }")
-            case false =>
-                dependencyFreeSchemas.find((k, s) => k == ROOT_SCHEMA_KEY) match
-                    case Some((k, s)) => Right(s)
-                    case None         =>
-                        Schema
-                            .sequenceEithers(
-                                schemaWithDependencies.map((k, s, d) => s.replaceReferencedValues(dependencyFreeSchemas*).map(ss => (k, ss)))
-                            )
-                            .flatMap(x => resolveReferencedSchemas(Chunk.fromIterable(x)))
- */

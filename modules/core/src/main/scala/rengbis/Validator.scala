@@ -3,7 +3,7 @@ package rengbis
 import java.nio.file.Path
 import zio.Chunk
 import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TupleValue }
-import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint }
+import rengbis.Schema.{ BinaryConstraint, BoundOp, ListConstraint, NumericConstraint, TextConstraint }
 import rengbis.Schema.BinaryConstraint.BinaryToTextEncoder
 import rengbis.Schema.BinaryValue as SchemaBinaryValue
 import scala.util.{ Failure, Success, Try }
@@ -55,18 +55,27 @@ object Validator:
         return sb.toString.r
 
     def validateTextConstraints(constraint: TextConstraint.Constraint, text: String) = constraint match
-        case TextConstraint.MinLength(size) => if (text.length >= size) then ValidationResult.valid else ValidationResult.reportError(s"minLength constraint (${ size }) not met: ${ text.length() }")
-        case TextConstraint.MaxLength(size) => if (text.length <= size) then ValidationResult.valid else ValidationResult.reportError(s"maxLength constraint (${ size }) not met: ${ text.length() }")
-        case TextConstraint.Length(size)    => if (text.length == size) then ValidationResult.valid else ValidationResult.reportError(s"length constraint (${ size }) not met: ${ text.length() }")
-        case TextConstraint.Regex(pattern)  => if pattern.r.matches(text) then ValidationResult.valid else ValidationResult.reportError(s"regex ($pattern) not matching")
-        case TextConstraint.Format(format)  => if formatToRegex(format).matches(text) then ValidationResult.valid else ValidationResult.reportError(s"format (${ format }) not matching")
+        case TextConstraint.Size(bound)    =>
+            val len = text.length
+            bound.op match
+                case BoundOp.Exact        => if len == bound.value then ValidationResult.valid else ValidationResult.reportError(s"length constraint (${ bound.value }) not met: ${ len }")
+                case BoundOp.MinInclusive => if len >= bound.value then ValidationResult.valid else ValidationResult.reportError(s"minLength constraint (${ bound.value }) not met: ${ len }")
+                case BoundOp.MinExclusive => if len > bound.value then ValidationResult.valid else ValidationResult.reportError(s"minLength constraint (> ${ bound.value }) not met: ${ len }")
+                case BoundOp.MaxInclusive => if len <= bound.value then ValidationResult.valid else ValidationResult.reportError(s"maxLength constraint (${ bound.value }) not met: ${ len }")
+                case BoundOp.MaxExclusive => if len < bound.value then ValidationResult.valid else ValidationResult.reportError(s"maxLength constraint (< ${ bound.value }) not met: ${ len }")
+        case TextConstraint.Regex(pattern) => if pattern.r.matches(text) then ValidationResult.valid else ValidationResult.reportError(s"regex ($pattern) not matching")
+        case TextConstraint.Format(format) => if formatToRegex(format).matches(text) then ValidationResult.valid else ValidationResult.reportError(s"format (${ format }) not matching")
 
     def validateListConstraints(constraint: ListConstraint.Constraint, list: Chunk[Value], itemSchema: Schema): ValidationResult =
         val size = list.size
         constraint match
-            case ListConstraint.MinSize(minSize)       => if (size >= minSize) then ValidationResult.valid else ValidationResult.reportError(s"list minimum size constraint (${ minSize }) not met: ${ size }")
-            case ListConstraint.MaxSize(maxSize)       => if (size <= maxSize) then ValidationResult.valid else ValidationResult.reportError(s"list maximum size constraint (${ maxSize }) not met: ${ size }")
-            case ListConstraint.ExactSize(exactSize)   => if (size == exactSize) then ValidationResult.valid else ValidationResult.reportError(s"list exact size constraint (${ exactSize }) not met: ${ size }")
+            case ListConstraint.Size(bound)            =>
+                bound.op match
+                    case BoundOp.Exact        => if size == bound.value then ValidationResult.valid else ValidationResult.reportError(s"list exact size constraint (${ bound.value }) not met: ${ size }")
+                    case BoundOp.MinInclusive => if size >= bound.value then ValidationResult.valid else ValidationResult.reportError(s"list minimum size constraint (${ bound.value }) not met: ${ size }")
+                    case BoundOp.MinExclusive => if size > bound.value then ValidationResult.valid else ValidationResult.reportError(s"list minimum size constraint (> ${ bound.value }) not met: ${ size }")
+                    case BoundOp.MaxInclusive => if size <= bound.value then ValidationResult.valid else ValidationResult.reportError(s"list maximum size constraint (${ bound.value }) not met: ${ size }")
+                    case BoundOp.MaxExclusive => if size < bound.value then ValidationResult.valid else ValidationResult.reportError(s"list maximum size constraint (< ${ bound.value }) not met: ${ size }")
             case ListConstraint.Unique                 => validateUniqueness(list, itemSchema)
             case ListConstraint.UniqueByFields(fields) => validateUniquenessBy(list, fields, itemSchema)
 
@@ -132,12 +141,14 @@ object Validator:
             else ValidationResult.valid
 
     def validateNumericConstraints(constraint: NumericConstraint.Constraint, value: BigDecimal) = constraint match
-        case NumericConstraint.Integer                => if value.isWhole then ValidationResult.valid else ValidationResult.reportError(s"integer constraint not met: ${ value } is not an integer")
-        case NumericConstraint.MinValue(min)          => if value >= min then ValidationResult.valid else ValidationResult.reportError(s"minimum value constraint (>= ${ min }) not met: ${ value }")
-        case NumericConstraint.MinValueExclusive(min) => if value > min then ValidationResult.valid else ValidationResult.reportError(s"minimum value constraint (> ${ min }) not met: ${ value }")
-        case NumericConstraint.MaxValue(max)          => if value <= max then ValidationResult.valid else ValidationResult.reportError(s"maximum value constraint (<= ${ max }) not met: ${ value }")
-        case NumericConstraint.MaxValueExclusive(max) => if value < max then ValidationResult.valid else ValidationResult.reportError(s"maximum value constraint (< ${ max }) not met: ${ value }")
-        case NumericConstraint.ExactValue(exact)      => if value == exact then ValidationResult.valid else ValidationResult.reportError(s"exact value constraint (${ exact }) not met: ${ value }")
+        case NumericConstraint.Integer      => if value.isWhole then ValidationResult.valid else ValidationResult.reportError(s"integer constraint not met: ${ value } is not an integer")
+        case NumericConstraint.Value(bound) =>
+            bound.op match
+                case BoundOp.Exact        => if value == bound.value then ValidationResult.valid else ValidationResult.reportError(s"exact value constraint (${ bound.value }) not met: ${ value }")
+                case BoundOp.MinInclusive => if value >= bound.value then ValidationResult.valid else ValidationResult.reportError(s"minimum value constraint (>= ${ bound.value }) not met: ${ value }")
+                case BoundOp.MinExclusive => if value > bound.value then ValidationResult.valid else ValidationResult.reportError(s"minimum value constraint (> ${ bound.value }) not met: ${ value }")
+                case BoundOp.MaxInclusive => if value <= bound.value then ValidationResult.valid else ValidationResult.reportError(s"maximum value constraint (<= ${ bound.value }) not met: ${ value }")
+                case BoundOp.MaxExclusive => if value < bound.value then ValidationResult.valid else ValidationResult.reportError(s"maximum value constraint (< ${ bound.value }) not met: ${ value }")
 
     def decodeEncoding(encoder: BinaryToTextEncoder, text: String): Either[String, Chunk[Byte]] =
         Try:
@@ -165,7 +176,7 @@ object Validator:
                         if idx < 0 then throw new IllegalArgumentException(s"Invalid base58 character: $c")
                         num = num * 58 + idx
                     val bytes    = num.toByteArray
-                    val result = if bytes.length > 1 && bytes(0) == 0 then bytes.tail else bytes
+                    val result   = if bytes.length > 1 && bytes(0) == 0 then bytes.tail else bytes
                     Chunk.fromArray(result)
                 case BinaryToTextEncoder.ascii85 =>
                     val cleanInput = text.replaceAll("\\s", "")
@@ -194,15 +205,20 @@ object Validator:
             case Success(bytes) => Right(bytes)
             case Failure(e)     => Left(e.getMessage)
 
-    def validateBinarySizeConstraint(constraint: BinaryConstraint.SizeConstraint, data: Chunk[Byte]): ValidationResult =
+    def validateBinarySizeConstraint(constraint: BinaryConstraint.Size, data: Chunk[Byte]): ValidationResult =
         val byteSize = data.length
-        constraint match
-            case BinaryConstraint.MinSize(minSize, unit)     => if byteSize >= (minSize * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary minimum size constraint (${ minSize } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
-            case BinaryConstraint.MaxSize(maxSize, unit)     => if byteSize <= (maxSize * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary maximum size constraint (${ maxSize } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
-            case BinaryConstraint.ExactSize(exactSize, unit) => if byteSize == (exactSize * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary exact size constraint (${ exactSize } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
+        val bound    = constraint.bound
+        val unit     = constraint.unit
+        val size     = bound.value
+        bound.op match
+            case BoundOp.Exact        => if byteSize == (size * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary exact size constraint (${ size } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
+            case BoundOp.MinInclusive => if byteSize >= (size * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary minimum size constraint (${ size } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
+            case BoundOp.MinExclusive => if byteSize > (size * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary minimum size constraint (> ${ size } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
+            case BoundOp.MaxInclusive => if byteSize <= (size * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary maximum size constraint (${ size } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
+            case BoundOp.MaxExclusive => if byteSize < (size * unit.bytes) then ValidationResult.valid else ValidationResult.reportError(s"binary maximum size constraint (< ${ size } ${ unit.symbol }) not met: ${ byteSize / unit.bytes }")
 
     def validateBinaryConstraints(constraints: Seq[BinaryConstraint.Constraint], data: Chunk[Byte]): ValidationResult =
-        val sizeConstraints = constraints.collect { case c: BinaryConstraint.SizeConstraint => c }
+        val sizeConstraints = constraints.collect { case c: BinaryConstraint.Size => c }
         ValidationResult.summarize(sizeConstraints.map(c => validateBinarySizeConstraint(c, data)))
 
     def validateValue(schema: Schema, value: Value): ValidationResult = schema match
