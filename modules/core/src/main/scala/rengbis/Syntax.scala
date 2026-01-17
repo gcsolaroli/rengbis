@@ -2,7 +2,7 @@ package rengbis
 
 import zio.Chunk
 import zio.parser.{ AnySyntaxOps, Parser, ParserOps, Printer, StringErrSyntaxOps, StringParserError, Syntax, SyntaxOps }
-import Schema.{ AlternativeValues, BinaryValue, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue }
+import Schema.{ AlternativeValues, BinaryValue, Documented, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue }
 import Schema.{ BinaryConstraint, BoundConstraint, BoundOp, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint }
 
 object SchemaSyntax:
@@ -18,7 +18,27 @@ object SchemaSyntax:
 
     val whitespaces: SchemaSyntax[Unit]  = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk(' '))
     val whitespaces0: SchemaSyntax[Unit] = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk())
-    val comment: SchemaSyntax[Unit]      = (Syntax.char('#') ~ Syntax.charNotIn('\n').repeat0).unit(Chunk())
+    // Regular comment: # not followed by # (to distinguish from ## doc comments)
+    val comment: SchemaSyntax[Unit]      =
+        (Syntax.char('#') ~> Syntax.charNotIn('#') ~ Syntax.charNotIn('\n').repeat0).unit((' ', Chunk.empty))
+            <> Syntax.char('#').unit(())
+
+    // Documentation comments: ## at start of line
+    val docCommentLine: SchemaSyntax[String]              = (
+        whitespaces0 ~ Syntax.string("##", ()) ~ whitespaces0 ~> Syntax.charNotIn('\n').repeat0.string <~ Syntax.char('\n')
+    )
+    val precedingDocComment: SchemaSyntax[Option[String]] = docCommentLine.repeat0.transform(
+        lines => if lines.isEmpty then None else Some(lines.map(_.trim).mkString("\n")),
+        doc => doc.map(s => Chunk.fromIterable(s.split("\n").map(_ + "\n").toSeq)).getOrElse(Chunk.empty)
+    )
+
+    // Trailing doc comment: ## at end of line (single line only)
+    val trailingDocComment: SchemaSyntax[Option[String]] = (
+        whitespaces ~ Syntax.string("##", ()) ~ whitespaces0 ~> Syntax.charNotIn('\n').repeat0.string
+    ).optional.transform(
+        opt => opt.map(_.trim).filter(_.nonEmpty),
+        doc => doc
+    )
 
     val number: SchemaSyntax[Int] = Syntax.digit.repeat.transform(
         chars => chars.mkString.toInt,
@@ -173,7 +193,20 @@ object SchemaSyntax:
 
     val valueDefinition: SchemaSyntax[Schema] = Syntax.char('=') ~ whitespaces ~ items
 
-    val namedValue: SchemaSyntax[(String, Schema)] = label ~ whitespaces ~ valueDefinition
+    // Named value with optional doc comments (preceding ## lines and/or trailing ##)
+    val namedValue: SchemaSyntax[(String, Schema)] = (
+        precedingDocComment ~ whitespaces0 ~ label ~ whitespaces ~ valueDefinition ~ trailingDocComment
+    ).transform(
+        { case (precedingDoc, name, schema, trailingDoc) =>
+            val doc = Documentation.combineDoc(precedingDoc, trailingDoc)
+            (name, schema.withDoc(doc))
+        },
+        { case (name, schema) =>
+            schema match
+                case Documented(doc, inner) => (doc, name, inner, None)
+                case _                      => (None, name, schema, None)
+        }
+    )
 
     val unquotedPath: SchemaSyntax[String] = Syntax.charNotIn(' ', '\t', '\r', '\n').repeat.string
     val importPath: SchemaSyntax[String]   = quotedString <> unquotedPath
@@ -202,13 +235,31 @@ object SchemaSyntax:
         schema => schema.reference
     )
 
-    val objectValue: SchemaSyntax[Schema.ObjectValue] = (
-        Syntax.char('{') ~> (emptyLines ~ whitespaces ~
-            objectLabel ~ Syntax.char(':') ~ whitespaces ~ items).repeatWithSep(whitespaces0 ~ (Syntax.char(',') <> emptyLines))
+    // Object field with optional doc comments (preceding ## lines and/or trailing ##)
+    val objectField: SchemaSyntax[(ObjectLabel, Schema)] = (
+        precedingDocComment ~ whitespaces0 ~ objectLabel ~ Syntax.char(':') ~ whitespaces ~ items ~ trailingDocComment
+    ).transform(
+        { case (precedingDoc, label, schema, trailingDoc) =>
+            val doc = Documentation.combineDoc(precedingDoc, trailingDoc)
+            (label, schema.withDoc(doc))
+        },
+        { case (label, schema) =>
+            schema match
+                case Documented(doc, inner) => (doc, label, inner, None)
+                case _                      => (None, label, schema, None)
+        }
+    )
+
+    val objectValue: SchemaSyntax[Schema] = (
+        Syntax.char('{') ~> trailingDocComment ~ (emptyLines ~ whitespaces ~ objectField).repeatWithSep(whitespaces0 ~ (Syntax.char(',') <> emptyLines))
             ~ whitespaces ~ emptyLines <~ whitespaces0 ~ Syntax.char('}')
     ).transform(
-        keys => Schema.ObjectValue(keys.toMap),
-        obj => Chunk.fromIterable(obj.obj)
+        { case (doc, keys) => Schema.ObjectValue(keys.toMap).withDoc(doc) },
+        {
+            case Documented(doc, obj: Schema.ObjectValue) => (doc, Chunk.fromIterable(obj.obj))
+            case obj: Schema.ObjectValue                  => (None, Chunk.fromIterable(obj.obj))
+            case _                                        => (None, Chunk.empty) // Should never happen
+        }
     )
 
     val mapSpreadKey: SchemaSyntax[Unit]        = Syntax.string("...", ()) <> Syntax.string("…", ())
@@ -229,7 +280,7 @@ object SchemaSyntax:
             <> textValue.asSchema { case t: Schema.TextValue => t }
             <> givenTextValue.asSchema { case g: Schema.GivenTextValue => g }
             <> mapValue.asSchema { case m: Schema.MapValue => m }
-            <> objectValue.asSchema { case o: Schema.ObjectValue => o }
+            <> objectValue.asSchema { case o: Schema.ObjectValue => o; case d @ Documented(_, _: Schema.ObjectValue) => d }
             <> groupedAlternatives.asSchema { case e: Schema.EnumValues => e; case a: Schema.AlternativeValues => a }
             <> tupleValues.asSchema { case t: Schema.TupleValue => t }
             <> scopedReference.asSchema { case s: Schema.ScopedReference => s }
@@ -328,7 +379,19 @@ object SchemaSyntax:
             <> tupleValues.asSchema { case t: Schema.TupleValue => t }
             <> item
 
-    val root: SchemaSyntax[Schema] = valueDefinition
+    // Root schema with optional doc comments (preceding ## lines and/or trailing ##)
+    val root: SchemaSyntax[Schema] = (
+        precedingDocComment ~ whitespaces0 ~ valueDefinition ~ trailingDocComment
+    ).transform(
+        { case (precedingDoc, schema, trailingDoc) =>
+            val doc = Documentation.combineDoc(precedingDoc, trailingDoc)
+            schema.withDoc(doc)
+        },
+        schema =>
+            schema match
+                case Documented(doc, inner) => (doc, inner, None)
+                case _                      => (None, schema, None)
+    )
 
     val definition: SchemaSyntax[(String, Schema)] = importStatement <> namedValue
 
@@ -341,6 +404,15 @@ object SchemaSyntax:
     )
 
     // ========================================================================
+
+    object Documentation:
+        /** Combines preceding and trailing doc comments into a single Option[String] */
+        def combineDoc(preceding: Option[String], trailing: Option[String]): Option[String] =
+            (preceding, trailing) match
+                case (Some(p), Some(t)) => Some(s"$p\n$t")
+                case (Some(p), None)    => Some(p)
+                case (None, Some(t))    => Some(t)
+                case (None, None)       => None
 
     object BoundConstraintHelpers:
         def boundConstraintSyntax[K, V](keySyntax: SchemaSyntax[K], valueSyntax: SchemaSyntax[V]): SchemaSyntax[Chunk[(K, BoundConstraint[V])]] =

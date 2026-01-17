@@ -2,7 +2,7 @@ package rengbis
 
 import java.nio.file.Path
 import zio.Chunk
-import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TupleValue }
+import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, Documented, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TupleValue }
 import rengbis.Schema.{ BinaryConstraint, BoundOp, ListConstraint, NumericConstraint, TextConstraint }
 import rengbis.Schema.BinaryConstraint.BinaryToTextEncoder
 import rengbis.Schema.BinaryValue as SchemaBinaryValue
@@ -227,6 +227,7 @@ object Validator:
         ValidationResult.summarize(sizeConstraints.map(c => validateBinarySizeConstraint(c, data)))
 
     def validateValue(schema: Schema, value: Value): ValidationResult = schema match
+        case Documented(_, inner)            => validateValue(inner, value)
         case Fail()                          => ValidationResult.reportError(s"fail value")
         case AnyValue()                      => ValidationResult.valid
         case BooleanValue()                  =>

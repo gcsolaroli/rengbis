@@ -64,8 +64,18 @@ object Schema:
     // ------------------------------------------------------------------------
 
     sealed abstract class Schema:
+        def doc: Option[String]                                                         = None
         def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] = Right(this)
         def dependencies: Seq[String]                                                   = Seq.empty
+        def withDoc(documentation: String): Schema                                      = Documented(Some(documentation), this)
+        def withDoc(documentation: Option[String]): Schema                              = documentation match
+            case Some(d) => Documented(Some(d), this)
+            case None    => this
+
+    final case class Documented(override val doc: Option[String], schema: Schema) extends Schema:
+        override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
+            schema.replaceReferencedValues(context*).map(s => Documented(doc, s))
+        override def dependencies: Seq[String]                                                   = schema.dependencies
 
     final case class Fail()         extends Schema
     final case class AnyValue()     extends Schema

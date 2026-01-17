@@ -279,7 +279,38 @@ It is possible to specify a default value for `text` and `number` fields using t
 Default values are only allowed on mandatory fields, not on optional fields (marked with `?`).
 
 ## Comments
-Anything after a `#` character, up to the end of the line, is ignored by the parser and thus treated as a comment.
+Anything after a `#` character (not followed by another `#`), up to the end of the line, is ignored by the parser and thus treated as a comment.
+
+### Documentation comments
+Documentation comments use `##` (double hash) and are attached to schema elements. They can be placed either on preceding lines or as trailing comments on the same line:
+
+```rengbis
+## This documents the entire schema
+= {
+    ## The user's full name
+    name: text
+    age: number  ## The user's age in years
+    ## List of hobbies
+    ## Can contain any number of items
+    hobbies: text*
+}
+```
+
+Documentation comments can also be attached to named values:
+```rengbis
+## A valid email address format
+email = text [ regex = "[^@]+@[^@]+\\.[^@]+" ]
+
+## A user profile structure
+user = {
+    name: text
+    email: email
+}
+
+= user
+```
+
+Unlike regular comments, documentation comments are preserved in the parsed schema and can be used for generating documentation or providing context when importing/exporting schemas to other formats.
 
 ## Imports
 It is possible to reference external files (currently only with a relative path) in order to *include* external definitions in the current scope.

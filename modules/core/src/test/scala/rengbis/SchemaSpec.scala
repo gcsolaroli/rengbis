@@ -2,7 +2,7 @@ package rengbis
 
 import zio.test.{ assertTrue, ZIOSpecDefault }
 
-import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TupleValue }
+import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, Documented, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TupleValue }
 import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint }
 import rengbis.testHelpers.{ binBytes, listSize, numValue, textLength }
 
@@ -347,5 +347,178 @@ object SchemaSpec extends ZIOSpecDefault:
                     |
                     |""".stripMargin
                 assertTrue(parse(schemaDefinition) == Right(AlternativeValues(TextValue(), NumericValue())))
+        ),
+        suite("Documentation comments")(
+            test("preceding doc comment on object field"):
+                val schemaDefinition = """= {
+                    |    ## This is the name field
+                    |    name: text
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        ObjectValue(
+                            Map(
+                                MandatoryLabel("name") -> Documented(Some("This is the name field"), TextValue())
+                            )
+                        )
+                    )
+                )
+            ,
+            test("trailing doc comment on object field"):
+                val schemaDefinition = """= {
+                    |    name: text  ## This is the name field
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        ObjectValue(
+                            Map(
+                                MandatoryLabel("name") -> Documented(Some("This is the name field"), TextValue())
+                            )
+                        )
+                    )
+                )
+            ,
+            test("multi-line preceding doc comment"):
+                val schemaDefinition = """= {
+                    |    ## This is the name field
+                    |    ## It contains the user's full name
+                    |    name: text
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        ObjectValue(
+                            Map(
+                                MandatoryLabel("name") -> Documented(Some("This is the name field\nIt contains the user's full name"), TextValue())
+                            )
+                        )
+                    )
+                )
+            ,
+            test("multiple fields with doc comments"):
+                val schemaDefinition = """= {
+                    |    ## The user's name
+                    |    name: text
+                    |    ## The user's age
+                    |    age: number
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        ObjectValue(
+                            Map(
+                                MandatoryLabel("name") -> Documented(Some("The user's name"), TextValue()),
+                                MandatoryLabel("age")  -> Documented(Some("The user's age"), NumericValue())
+                            )
+                        )
+                    )
+                )
+            ,
+            test("mixed doc comments - some fields documented, some not"):
+                val schemaDefinition = """
+                    |= {
+                    |    ## Documented field
+                    |    name: text
+                    |    age: number
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        ObjectValue(
+                            Map(
+                                MandatoryLabel("name") -> Documented(Some("Documented field"), TextValue()),
+                                MandatoryLabel("age")  -> NumericValue()
+                            )
+                        )
+                    )
+                )
+            ,
+            test("doc comment on root schema"):
+                val schemaDefinition = """
+                    |## This is the root schema
+                    |= text
+                    |""".stripMargin
+                assertTrue(parse(schemaDefinition) == Right(Documented(Some("This is the root schema"), TextValue())))
+            ,
+            test("doc comment on named value"):
+                val schemaDefinition = """
+                    |## Documentation for myType
+                    |myType = number
+                    |= myType""".stripMargin
+                val result           = SchemaLoader.parseSchema(schemaDefinition)
+                assertTrue(
+                    result.isRight &&
+                        result.toOption.get.definitions
+                            .get("myType")
+                            .contains(
+                                Documented(Some("Documentation for myType"), NumericValue())
+                            )
+                )
+            ,
+            test("trailing doc comment on root schema"):
+                val schemaDefinition = """= text  ## Root documentation"""
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        Documented(Some("Root documentation"), TextValue())
+                    )
+                )
+            ,
+            test("trailing doc comment on root object schema"):
+                val schemaDefinition = """
+                    |= {    ## Root documentation
+                    |   name: text
+                    |   value: number
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        Documented(
+                            Some("Root documentation"),
+                            ObjectValue(
+                                Map(
+                                    MandatoryLabel("name")  -> TextValue(),
+                                    MandatoryLabel("value") -> NumericValue()
+                                )
+                            )
+                        )
+                    )
+                )
+            ,
+            test("trailing doc comment on root object schema, take 2"):
+                val schemaDefinition = """
+                    |= {
+                    |   name: text
+                    |   value: number
+                    |} ## Root documentation""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        Documented(
+                            Some("Root documentation"),
+                            ObjectValue(
+                                Map(
+                                    MandatoryLabel("name")  -> TextValue(),
+                                    MandatoryLabel("value") -> NumericValue()
+                                )
+                            )
+                        )
+                    )
+                )
+            ,
+            test("trailing doc comment on root object schema, take 3"):
+                val schemaDefinition = """
+                    |## Root documentation
+                    |= {
+                    |   name: text
+                    |   value: number
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        Documented(
+                            Some("Root documentation"),
+                            ObjectValue(
+                                Map(
+                                    MandatoryLabel("name")  -> TextValue(),
+                                    MandatoryLabel("value") -> NumericValue()
+                                )
+                            )
+                        )
+                    )
+                )
         )
     )
