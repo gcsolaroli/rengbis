@@ -561,5 +561,28 @@ object ValidatorSpec extends ZIOSpecDefault:
                             assertTrue(validateJsonString(schema, """{"status": "this is way too long"}""").isValid == false)
                         )
                     case Left(value)   => assertTrue(value == ""))
+        ),
+        suite("Deprecation warnings")(
+            test("using deprecated field reports warning"):
+                val schemaDefinition = """= { @deprecated oldField: text, newField: number }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        val result = validateJsonString(schema, """{"oldField": "test", "newField": 42}""")
+                        allSuccesses(
+                            assertTrue(result.isValid),
+                            assertTrue(result.hasWarnings)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("not using deprecated field reports no warning"):
+                val schemaDefinition = """= { @deprecated oldField?: text, newField: number }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        val result = validateJsonString(schema, """{"newField": 42}""")
+                        allSuccesses(
+                            assertTrue(result.isValid),
+                            assertTrue(result.hasWarnings == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
         )
     )

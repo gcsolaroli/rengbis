@@ -2,7 +2,7 @@ package rengbis
 
 import zio.Chunk
 import zio.parser.{ AnySyntaxOps, Parser, ParserOps, Printer, StringErrSyntaxOps, StringParserError, Syntax, SyntaxOps }
-import Schema.{ AlternativeValues, BinaryValue, Documented, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue }
+import Schema.{ AlternativeValues, BinaryValue, Deprecated, Documented, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue }
 import Schema.{ BinaryConstraint, BoundConstraint, BoundOp, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint }
 
 object SchemaSyntax:
@@ -25,11 +25,11 @@ object SchemaSyntax:
 
     // Documentation comments: ## at start of line
     val docCommentLine: SchemaSyntax[String]              = (
-        whitespaces0 ~ Syntax.string("##", ()) ~ whitespaces0 ~> Syntax.charNotIn('\n').repeat0.string <~ Syntax.char('\n')
+        whitespaces0 ~ Syntax.string("##", ()) ~ whitespaces ~> Syntax.charNotIn('\n').repeat0.string <~ Syntax.char('\n')
     )
     val precedingDocComment: SchemaSyntax[Option[String]] = docCommentLine.repeat0.transform(
         lines => if lines.isEmpty then None else Some(lines.map(_.trim).mkString("\n")),
-        doc => doc.map(s => Chunk.fromIterable(s.split("\n").map(_ + "\n").toSeq)).getOrElse(Chunk.empty)
+        doc => doc.map(s => Chunk.fromIterable(s.split("\n").toSeq)).getOrElse(Chunk.empty)
     )
 
     // Trailing doc comment: ## at end of line (single line only)
@@ -40,12 +40,19 @@ object SchemaSyntax:
         doc => doc
     )
 
+    val deprecatedMarker: SchemaSyntax[Boolean] = (Syntax.string("@deprecated", ()) ~ whitespaces).optional
+        .transform(
+            opt => opt.isDefined,
+            isDeprecated => if isDeprecated then Some(()) else None
+        )
+
     val number: SchemaSyntax[Int] = Syntax.digit.repeat.transform(
         chars => chars.mkString.toInt,
         num => Chunk.fromArray(num.toString.toCharArray)
     )
 
     val emptyLines: SchemaSyntax[Unit] = (whitespaces ~ comment.optional ~ Syntax.char('\n')).repeat0.unit(Chunk())
+    val newline: SchemaSyntax[Unit]    = Syntax.char('\n').unit(())
 
     val quote: SchemaSyntax[Unit]          = Syntax.char('\"')
     val escapedChar: SchemaSyntax[Char]    = Syntax.charNotIn('\"') // TODO: real escaping support
@@ -193,18 +200,22 @@ object SchemaSyntax:
 
     val valueDefinition: SchemaSyntax[Schema] = Syntax.char('=') ~ whitespaces ~ items
 
-    // Named value with optional doc comments (preceding ## lines and/or trailing ##)
     val namedValue: SchemaSyntax[(String, Schema)] = (
-        precedingDocComment ~ whitespaces0 ~ label ~ whitespaces ~ valueDefinition ~ trailingDocComment
+        precedingDocComment ~ whitespaces0 ~ deprecatedMarker ~ label ~ whitespaces ~ valueDefinition ~ trailingDocComment
     ).transform(
-        { case (precedingDoc, name, schema, trailingDoc) =>
-            val doc = Documentation.combineDoc(precedingDoc, trailingDoc)
-            (name, schema.withDoc(doc))
+        { case (precedingDoc, isDeprecated, name, schema, trailingDoc) =>
+            val doc          = Documentation.combineDoc(precedingDoc, trailingDoc)
+            val withDoc      = schema.withDoc(doc)
+            val withMetadata = if isDeprecated then withDoc.asDeprecated else withDoc
+            (name, withMetadata)
         },
         { case (name, schema) =>
-            schema match
-                case Documented(doc, inner) => (doc, name, inner, None)
-                case _                      => (None, name, schema, None)
+            def unwrap(s: Schema): (Option[String], Boolean, Schema) = s match
+                case Deprecated(inner)      => val (doc, _, s) = unwrap(inner); (doc, true, s)
+                case Documented(doc, inner) => (doc, false, inner)
+                case _                      => (None, false, s)
+            val (doc, isDeprecated, inner)                           = unwrap(schema)
+            (doc, isDeprecated, name, inner, None)
         }
     )
 
@@ -235,18 +246,22 @@ object SchemaSyntax:
         schema => schema.reference
     )
 
-    // Object field with optional doc comments (preceding ## lines and/or trailing ##)
     val objectField: SchemaSyntax[(ObjectLabel, Schema)] = (
-        precedingDocComment ~ whitespaces0 ~ objectLabel ~ Syntax.char(':') ~ whitespaces ~ items ~ trailingDocComment
+        precedingDocComment ~ whitespaces0 ~ deprecatedMarker ~ objectLabel ~ Syntax.char(':') ~ whitespaces ~ items ~ trailingDocComment
     ).transform(
-        { case (precedingDoc, label, schema, trailingDoc) =>
-            val doc = Documentation.combineDoc(precedingDoc, trailingDoc)
-            (label, schema.withDoc(doc))
+        { case (precedingDoc, isDeprecated, label, schema, trailingDoc) =>
+            val doc          = Documentation.combineDoc(precedingDoc, trailingDoc)
+            val withDoc      = schema.withDoc(doc)
+            val withMetadata = if isDeprecated then withDoc.asDeprecated else withDoc
+            (label, withMetadata)
         },
         { case (label, schema) =>
-            schema match
-                case Documented(doc, inner) => (doc, label, inner, None)
-                case _                      => (None, label, schema, None)
+            def unwrap(s: Schema): (Option[String], Boolean, Schema) = s match
+                case Deprecated(inner)      => val (doc, _, s) = unwrap(inner); (doc, true, s)
+                case Documented(doc, inner) => (doc, false, inner)
+                case _                      => (None, false, s)
+            val (doc, isDeprecated, inner)                           = unwrap(schema)
+            (doc, isDeprecated, label, inner, None)
         }
     )
 

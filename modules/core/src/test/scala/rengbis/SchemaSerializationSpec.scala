@@ -1,7 +1,7 @@
 package rengbis
 
 import zio.test.{ assertTrue, ZIOSpecDefault }
-import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, BooleanValue, EnumValues, GivenTextValue, ListOfValues, MandatoryLabel, MapValue, NumericValue, ObjectValue, OptionalLabel, Schema, TextValue, TupleValue }
+import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, BooleanValue, Deprecated, Documented, EnumValues, GivenTextValue, ListOfValues, MandatoryLabel, MapValue, NumericValue, ObjectValue, OptionalLabel, Schema, TextValue, TupleValue }
 import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint }
 import rengbis.testHelpers.{ binBytes, listSize, numValue, textLength }
 
@@ -65,6 +65,30 @@ object SchemaSerializationSpec extends ZIOSpecDefault:
         ),
         suite("Tuples")(
             printTest(TupleValue(TextValue(), NumericValue()), "(text, number)")
+        ),
+        suite("Documentation comments")(
+            printTest(
+                ObjectValue(Map(MandatoryLabel("name") -> Documented(Some("The name"), TextValue()))),
+                "{ ## The name\nname: text }"
+            ),
+            test("roundtrip: object field with doc comment (normalized to object doc)"):
+                val schema   = ObjectValue(Map(MandatoryLabel("name") -> Documented(Some("The name"), TextValue())))
+                val expected = Documented(Some("The name"), ObjectValue(Map(MandatoryLabel("name") -> TextValue())))
+                assertTrue(roundTrip(schema) == Right(expected))
+        ),
+        suite("Deprecated annotation")(
+            printTest(
+                ObjectValue(Map(MandatoryLabel("old") -> Deprecated(TextValue()))),
+                "{ @deprecated old: text }"
+            ),
+            roundTripTest(
+                ObjectValue(Map(MandatoryLabel("old") -> Deprecated(TextValue()))),
+                "deprecated object field"
+            ),
+            test("roundtrip: deprecated object field with doc comment (normalized to object doc)"):
+                val schema   = ObjectValue(Map(MandatoryLabel("old") -> Deprecated(Documented(Some("Old field"), TextValue()))))
+                val expected = Documented(Some("Old field"), ObjectValue(Map(MandatoryLabel("old") -> Deprecated(TextValue()))))
+                assertTrue(roundTrip(schema) == Right(expected))
         ),
         suite("Round-trip tests")(
             roundTripTest(AnyValue(), "any"),

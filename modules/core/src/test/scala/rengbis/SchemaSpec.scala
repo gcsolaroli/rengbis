@@ -2,7 +2,7 @@ package rengbis
 
 import zio.test.{ assertTrue, ZIOSpecDefault }
 
-import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, Documented, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TupleValue }
+import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, Deprecated, Documented, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TupleValue }
 import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint }
 import rengbis.testHelpers.{ binBytes, listSize, numValue, textLength }
 
@@ -516,6 +516,47 @@ object SchemaSpec extends ZIOSpecDefault:
                                     MandatoryLabel("name")  -> TextValue(),
                                     MandatoryLabel("value") -> NumericValue()
                                 )
+                            )
+                        )
+                    )
+                )
+        ),
+        suite("Deprecated annotation")(
+            test("@deprecated on object field"):
+                val schemaDefinition = """= {
+                    |    @deprecated oldField: text
+                    |    newField: number
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        ObjectValue(
+                            Map(
+                                MandatoryLabel("oldField") -> Deprecated(TextValue()),
+                                MandatoryLabel("newField") -> NumericValue()
+                            )
+                        )
+                    )
+                )
+            ,
+            test("@deprecated on named value"):
+                val schemaDefinition = """@deprecated legacyType = text
+                    |= legacyType""".stripMargin
+                val result           = SchemaLoader.parseSchema(schemaDefinition)
+                assertTrue(
+                    result.isRight &&
+                        result.toOption.get.definitions.get("legacyType").contains(Deprecated(TextValue()))
+                )
+            ,
+            test("@deprecated with doc comment"):
+                val schemaDefinition = """= {
+                    |    ## This field is old
+                    |    @deprecated oldField: text
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        ObjectValue(
+                            Map(
+                                MandatoryLabel("oldField") -> Deprecated(Documented(Some("This field is old"), TextValue()))
                             )
                         )
                     )

@@ -79,6 +79,7 @@ Here is a brief run down of the currently supported features:
 - [Default values](#default_values)
 - [Comments](#comments)
 - [Import](#import)
+- [Deprecated marker](#deprecated_marker)
 
 ## Types
 
@@ -311,6 +312,25 @@ user = {
 ```
 
 Unlike regular comments, documentation comments are preserved in the parsed schema and can be used for generating documentation or providing context when importing/exporting schemas to other formats.
+
+## Deprecated marker
+The `@deprecated` annotation marks fields or named values as deprecated. It must appear on the same line, immediately before the field name:
+
+```rengbis
+= {
+    @deprecated oldField: text
+    newField: number
+}
+```
+
+Named values can also be marked as deprecated:
+```rengbis
+@deprecated legacyType = text
+currentType = number
+= currentType
+```
+
+When validating data that uses deprecated fields, the validator will return warnings (while still validating the data). This helps identify usage of deprecated schema elements that should be migrated.
 
 ## Imports
 It is possible to reference external files (currently only with a relative path) in order to *include* external definitions in the current scope.
