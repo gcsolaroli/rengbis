@@ -22,28 +22,83 @@ object Schema:
         def isMaxInclusive: Boolean = op == BoundOp.MaxInclusive
         def isMaxExclusive: Boolean = op == BoundOp.MaxExclusive
 
+    /** Generic bounded range with optional min and/or max bounds */
+    case class BoundedRange[V](
+        min: Option[BoundConstraint[V]] = None,
+        max: Option[BoundConstraint[V]] = None
+    ):
+        def isEmpty: Boolean = min.isEmpty && max.isEmpty
+
+        /** Merge two BoundedRanges, combining min from one and max from the other */
+        def merge(other: BoundedRange[V]): BoundedRange[V] = BoundedRange(
+            min = this.min.orElse(other.min),
+            max = this.max.orElse(other.max)
+        )
+
+    object BoundedRange:
+        def exact[V](v: V): BoundedRange[V]                                             = BoundedRange(Some(BoundConstraint(BoundOp.Exact, v)), None)
+        def minInclusive[V](v: V): BoundedRange[V]                                      = BoundedRange(Some(BoundConstraint(BoundOp.MinInclusive, v)), None)
+        def minExclusive[V](v: V): BoundedRange[V]                                      = BoundedRange(Some(BoundConstraint(BoundOp.MinExclusive, v)), None)
+        def maxInclusive[V](v: V): BoundedRange[V]                                      = BoundedRange(None, Some(BoundConstraint(BoundOp.MaxInclusive, v)))
+        def maxExclusive[V](v: V): BoundedRange[V]                                      = BoundedRange(None, Some(BoundConstraint(BoundOp.MaxExclusive, v)))
+        def range[V](min: BoundConstraint[V], max: BoundConstraint[V]): BoundedRange[V] = BoundedRange(Some(min), Some(max))
+        def fromBounds[V](bounds: Seq[BoundConstraint[V]]): BoundedRange[V]             =
+            val minBound = bounds.find(b => b.isMinInclusive || b.isMinExclusive || b.isExact)
+            val maxBound = bounds.find(b => b.isMaxInclusive || b.isMaxExclusive)
+            BoundedRange(minBound, maxBound)
+
     // ........................................................................
 
     object TextConstraint:
-        sealed abstract class Constraint
-        case class Regex(pattern: String)            extends Constraint
-        case class Format(format: String)            extends Constraint
-        case class Size(bound: BoundConstraint[Int]) extends Constraint
+        type SizeRange = BoundedRange[Int]
+        val SizeRange = BoundedRange
+
+        /** Structured text constraints - each optional, at most one of each type */
+        case class Constraints(
+            size: Option[SizeRange] = None,
+            regex: Option[String] = None,
+            format: Option[String] = None
+        ):
+            def isEmpty: Boolean = size.isEmpty && regex.isEmpty && format.isEmpty
+
+        object Constraints:
+            val empty: Constraints = Constraints()
 
     object ListConstraint:
-        sealed abstract class Constraint
-        case class Size(bound: BoundConstraint[Int])   extends Constraint
-        case object Unique                             extends Constraint
-        case class UniqueByFields(fields: Seq[String]) extends Constraint
+        type SizeRange = BoundedRange[Int]
+        val SizeRange = BoundedRange
+
+        /** Uniqueness constraint - either simple unique or unique by specific fields (composite key) */
+        enum Uniqueness:
+            case Simple
+            case ByFields(fields: Seq[String]) // Composite key - uniqueness on the combination of fields
+
+        /** Structured list constraints Note: unique is a Seq to support multiple independent uniqueness constraints. Example: `unique = id, unique = code` means id must be unique AND code must be unique (independently). Example: `unique = (id, code)` means the (id, code) combination must be unique (composite key).
+          */
+        case class Constraints(
+            size: Option[SizeRange] = None,
+            unique: Seq[Uniqueness] = Seq.empty
+        ):
+            def isEmpty: Boolean = size.isEmpty && unique.isEmpty
+
+        object Constraints:
+            val empty: Constraints = Constraints()
 
     object NumericConstraint:
-        sealed abstract class Constraint
-        case object Integer                                  extends Constraint
-        case class Value(bound: BoundConstraint[BigDecimal]) extends Constraint
+        type ValueRange = BoundedRange[BigDecimal]
+        val ValueRange = BoundedRange
+
+        /** Structured numeric constraints */
+        case class Constraints(
+            value: Option[ValueRange] = None,
+            integer: Boolean = false
+        ):
+            def isEmpty: Boolean = value.isEmpty && !integer
+
+        object Constraints:
+            val empty: Constraints = Constraints()
 
     object BinaryConstraint:
-        sealed abstract class Constraint
-
         enum BinaryToTextEncoder(val code: String):
             case hex     extends BinaryToTextEncoder("hex")
             case base64  extends BinaryToTextEncoder("base64")
@@ -51,15 +106,24 @@ object Schema:
             case base58  extends BinaryToTextEncoder("base58")
             case ascii85 extends BinaryToTextEncoder("ascii85")
 
-        case class Encoding(encoder: BinaryToTextEncoder) extends Constraint
-
         enum BinaryUnit(val symbol: String, val bytes: Integer):
             case bytes extends BinaryUnit("bytes", 1)
             case KB    extends BinaryUnit("KB", 1024)
             case MB    extends BinaryUnit("MB", 1024 * 1024)
             case GB    extends BinaryUnit("GB", 1024 * 1024 * 1024)
 
-        case class Size(bound: BoundConstraint[Int], unit: BinaryUnit) extends Constraint
+        type SizeRange = BoundedRange[Int]
+        val SizeRange = BoundedRange
+
+        /** Structured binary constraints */
+        case class Constraints(
+            size: Option[SizeRange] = None,
+            encoding: Option[BinaryToTextEncoder] = None
+        ):
+            def isEmpty: Boolean = size.isEmpty && encoding.isEmpty
+
+        object Constraints:
+            val empty: Constraints = Constraints()
 
     object TimeConstraint:
         sealed abstract class Constraint
@@ -107,25 +171,27 @@ object Schema:
     final case class AnyValue()     extends Schema
     final case class BooleanValue() extends Schema
 
-    final case class TextValue(constraints: Seq[TextConstraint.Constraint] = Seq.empty, default: Option[String] = None) extends Schema
+    final case class TextValue(constraints: TextConstraint.Constraints = TextConstraint.Constraints.empty, default: Option[String] = None) extends Schema
     object TextValue:
-        def apply(constraints: TextConstraint.Constraint*): TextValue = TextValue(constraints.toSeq, None)
+        def apply(): TextValue = TextValue(TextConstraint.Constraints.empty, None)
 
     final case class GivenTextValue(value: String) extends Schema
 
-    final case class NumericValue(constraints: Seq[NumericConstraint.Constraint] = Seq.empty, default: Option[BigDecimal] = None) extends Schema
+    final case class NumericValue(constraints: NumericConstraint.Constraints = NumericConstraint.Constraints.empty, default: Option[BigDecimal] = None) extends Schema
     object NumericValue:
-        def apply(constraints: NumericConstraint.Constraint*): NumericValue = NumericValue(constraints.toSeq, None)
+        def apply(): NumericValue = NumericValue(NumericConstraint.Constraints.empty, None)
 
-    final case class BinaryValue(constraints: BinaryConstraint.Constraint*) extends Schema
+    final case class BinaryValue(constraints: BinaryConstraint.Constraints = BinaryConstraint.Constraints.empty) extends Schema
+    object BinaryValue:
+        def apply(): BinaryValue = BinaryValue(BinaryConstraint.Constraints.empty)
 
     final case class TimeValue(constraints: TimeConstraint.Constraint*) extends Schema
 
     final case class EnumValues(values: String*) extends Schema
 
-    final case class ListOfValues(schema: Schema, constraints: ListConstraint.Constraint*) extends Schema:
+    final case class ListOfValues(schema: Schema, constraints: ListConstraint.Constraints = ListConstraint.Constraints.empty) extends Schema:
         override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
-            schema.replaceReferencedValues(context*).map(ListOfValues(_, this.constraints*))
+            schema.replaceReferencedValues(context*).map(ListOfValues(_, this.constraints))
         override def dependencies: Seq[String]                                                   =
             schema.dependencies
 

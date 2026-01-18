@@ -60,7 +60,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
         ),
         suite("Text constraints")(
             test("exports size constraint (min)") {
-                val schema                   = TextValue(Seq(TextConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 5))))
+                val schema                   = TextValue(TextConstraint.Constraints(size = Some(TextConstraint.SizeRange.minInclusive(5))))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("string"), "minLength" -> Json.Num(5)),
@@ -68,7 +68,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports size constraint (max)") {
-                val schema                   = TextValue(Seq(TextConstraint.Size(BoundConstraint(BoundOp.MaxInclusive, 100))))
+                val schema                   = TextValue(TextConstraint.Constraints(size = Some(TextConstraint.SizeRange.maxInclusive(100))))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("string"), "maxLength" -> Json.Num(100)),
@@ -76,7 +76,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports regex pattern") {
-                val schema                   = TextValue(Seq(TextConstraint.Regex("^[a-z]+$")))
+                val schema                   = TextValue(TextConstraint.Constraints(regex = Some("^[a-z]+$")))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("string"), "pattern" -> Json.Str("^[a-z]+$")),
@@ -84,7 +84,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports email format") {
-                val schema                   = TextValue(Seq(TextConstraint.Format("email")))
+                val schema                   = TextValue(TextConstraint.Constraints(format = Some("email")))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("string"), "format" -> Json.Str("email")),
@@ -92,7 +92,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports default value") {
-                val schema                   = TextValue(Seq.empty, Some("default-text"))
+                val schema                   = TextValue(default = Some("default-text"))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("string"), "default" -> Json.Str("default-text")),
@@ -100,7 +100,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("reports friction for custom format") {
-                val schema                   = TextValue(Seq(TextConstraint.Format("my-custom-format")))
+                val schema                   = TextValue(TextConstraint.Constraints(format = Some("my-custom-format")))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("string")),
@@ -111,7 +111,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
         ),
         suite("Numeric constraints")(
             test("exports integer type") {
-                val schema                   = NumericValue(Seq(NumericConstraint.Integer))
+                val schema                   = NumericValue(NumericConstraint.Constraints(integer = true))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("integer")),
@@ -119,7 +119,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports minimum value") {
-                val schema                   = NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, BigDecimal(0)))))
+                val schema                   = NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.minInclusive(BigDecimal(0)))))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("number"), "minimum" -> Json.Num(0)),
@@ -127,7 +127,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports exclusive minimum") {
-                val schema                   = NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MinExclusive, BigDecimal(0)))))
+                val schema                   = NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.minExclusive(BigDecimal(0)))))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("number"), "exclusiveMinimum" -> Json.Num(0)),
@@ -135,7 +135,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports maximum value") {
-                val schema                   = NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(100)))))
+                val schema                   = NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.maxInclusive(BigDecimal(100)))))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("number"), "maximum" -> Json.Num(100)),
@@ -143,7 +143,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports exact value") {
-                val schema                   = NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.Exact, BigDecimal(42)))))
+                val schema                   = NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.exact(BigDecimal(42)))))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("number"), "const" -> Json.Num(42)),
@@ -151,7 +151,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports default value") {
-                val schema                   = NumericValue(Seq.empty, Some(BigDecimal(123)))
+                val schema                   = NumericValue(default = Some(BigDecimal(123)))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj("type" -> Json.Str("number"), "default" -> Json.Num(123)),
@@ -207,7 +207,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports list with minItems") {
-                val schema                   = ListOfValues(TextValue(), ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1)))
+                val schema                   = ListOfValues(TextValue(), ListConstraint.Constraints(size = Some(ListConstraint.SizeRange.minInclusive(1))))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj(
@@ -219,7 +219,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports list with uniqueItems") {
-                val schema                   = ListOfValues(TextValue(), ListConstraint.Unique)
+                val schema                   = ListOfValues(TextValue(), ListConstraint.Constraints(unique = Seq(ListConstraint.Uniqueness.Simple)))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     result == Json.Obj(
@@ -231,7 +231,7 @@ object JsonSchemaExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("reports friction for uniqueByFields") {
-                val schema                   = ListOfValues(TextValue(), ListConstraint.UniqueByFields(Seq("field1", "field2")))
+                val schema                   = ListOfValues(TextValue(), ListConstraint.Constraints(unique = Seq(ListConstraint.Uniqueness.ByFields(Seq("field1", "field2")))))
                 val (result, frictionReport) = JsonSchemaExporter.toJsonSchema(schema)
                 assertTrue(
                     frictionReport.nonEmpty,

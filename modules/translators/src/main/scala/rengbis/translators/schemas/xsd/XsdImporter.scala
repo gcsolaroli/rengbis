@@ -97,21 +97,23 @@ object XsdImporter:
         typeResult.flatMap { case (schema, ctx) =>
             // Handle occurrence constraints
             if maxOccurs == "unbounded" || maxOccurs.toIntOption.exists(_ > 1) then
-                val listConstraints = (minOccurs.toIntOption, maxOccurs) match
+                val sizeRange = (minOccurs.toIntOption, maxOccurs) match
                     case (Some(min), "unbounded") if min > 0 =>
-                        Seq(ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, min)))
+                        Some(ListConstraint.SizeRange.minInclusive(min))
                     case (Some(min), max)                    =>
                         max.toIntOption match
                             case Some(maxInt) if min > 0 =>
-                                Seq(
-                                    ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, min)),
-                                    ListConstraint.Size(BoundConstraint(BoundOp.MaxInclusive, maxInt))
+                                Some(
+                                    ListConstraint.SizeRange(
+                                        Some(BoundConstraint(BoundOp.MinInclusive, min)),
+                                        Some(BoundConstraint(BoundOp.MaxInclusive, maxInt))
+                                    )
                                 )
                             case Some(maxInt)            =>
-                                Seq(ListConstraint.Size(BoundConstraint(BoundOp.MaxInclusive, maxInt)))
-                            case None                    => Seq.empty
-                    case _                                   => Seq.empty
-                Right((ListOfValues(schema, listConstraints*), ctx))
+                                Some(ListConstraint.SizeRange.maxInclusive(maxInt))
+                            case None                    => None
+                    case _                                   => None
+                Right((ListOfValues(schema, ListConstraint.Constraints(size = sizeRange)), ctx))
             else Right((schema, ctx))
         }
 
@@ -145,39 +147,39 @@ object XsdImporter:
             case "integer" | "long" | "int" | "short" | "byte" | "nonNegativeInteger" | "positiveInteger" | "nonPositiveInteger" | "negativeInteger" | "unsignedLong" | "unsignedInt" | "unsignedShort" | "unsignedByte" =>
                 val constraints = baseType match
                     case "integer" | "long" | "int" | "short" | "byte"                                            =>
-                        Seq(NumericConstraint.Integer)
+                        NumericConstraint.Constraints(integer = true)
                     case "nonNegativeInteger" | "unsignedLong" | "unsignedInt" | "unsignedShort" | "unsignedByte" =>
-                        Seq(
-                            NumericConstraint.Integer,
-                            NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, BigDecimal(0)))
+                        NumericConstraint.Constraints(
+                            value = Some(NumericConstraint.ValueRange.minInclusive(BigDecimal(0))),
+                            integer = true
                         )
                     case "positiveInteger"                                                                        =>
-                        Seq(
-                            NumericConstraint.Integer,
-                            NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, BigDecimal(1)))
+                        NumericConstraint.Constraints(
+                            value = Some(NumericConstraint.ValueRange.minInclusive(BigDecimal(1))),
+                            integer = true
                         )
                     case "nonPositiveInteger"                                                                     =>
-                        Seq(
-                            NumericConstraint.Integer,
-                            NumericConstraint.Value(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(0)))
+                        NumericConstraint.Constraints(
+                            value = Some(NumericConstraint.ValueRange.maxInclusive(BigDecimal(0))),
+                            integer = true
                         )
                     case "negativeInteger"                                                                        =>
-                        Seq(
-                            NumericConstraint.Integer,
-                            NumericConstraint.Value(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(-1)))
+                        NumericConstraint.Constraints(
+                            value = Some(NumericConstraint.ValueRange.maxInclusive(BigDecimal(-1))),
+                            integer = true
                         )
-                    case _                                                                                        => Seq(NumericConstraint.Integer)
+                    case _                                                                                        => NumericConstraint.Constraints(integer = true)
                 Right((NumericValue(constraints), context))
 
             // Date/Time types
             case "dateTime" | "dateTimeStamp" =>
-                Right((TextValue(Seq(TextConstraint.Format("iso8601-datetime"))), context))
+                Right((TextValue(TextConstraint.Constraints(format = Some("iso8601-datetime"))), context))
 
             case "date" =>
-                Right((TextValue(Seq(TextConstraint.Format("iso8601-date"))), context))
+                Right((TextValue(TextConstraint.Constraints(format = Some("iso8601-date"))), context))
 
             case "time" =>
-                Right((TextValue(Seq(TextConstraint.Format("iso8601-time"))), context))
+                Right((TextValue(TextConstraint.Constraints(format = Some("iso8601-time"))), context))
 
             case "duration" | "dayTimeDuration" | "yearMonthDuration" | "gYear" | "gYearMonth" | "gMonth" | "gMonthDay" | "gDay" =>
                 val ctx = context.addLoss(
@@ -200,7 +202,7 @@ object XsdImporter:
 
             // URI
             case "anyURI" =>
-                Right((TextValue(Seq(TextConstraint.Format("uri"))), context))
+                Right((TextValue(TextConstraint.Constraints(format = Some("uri"))), context))
 
             // Special types
             case "anyType" | "anySimpleType" | "anyAtomicType" =>
@@ -267,7 +269,7 @@ object XsdImporter:
             patterns.headOption.foreach { pattern =>
                 currentSchema = currentSchema match
                     case TextValue(constraints, default) =>
-                        TextValue(constraints :+ TextConstraint.Regex(pattern), default)
+                        TextValue(constraints.copy(regex = Some(pattern)), default)
                     case other                           => other
             }
 
@@ -278,11 +280,12 @@ object XsdImporter:
 
             currentSchema = currentSchema match
                 case TextValue(constraints, default) =>
-                    var newConstraints = constraints
-                    length.foreach(len => newConstraints = newConstraints :+ TextConstraint.Size(BoundConstraint(BoundOp.Exact, len)))
-                    minLength.foreach(min => newConstraints = newConstraints :+ TextConstraint.Size(BoundConstraint(BoundOp.MinInclusive, min)))
-                    maxLength.foreach(max => newConstraints = newConstraints :+ TextConstraint.Size(BoundConstraint(BoundOp.MaxInclusive, max)))
-                    TextValue(newConstraints, default)
+                    var sizeRange = constraints.size.getOrElse(TextConstraint.SizeRange())
+                    length.foreach(len => sizeRange = TextConstraint.SizeRange.exact(len))
+                    minLength.foreach(min => sizeRange = sizeRange.merge(TextConstraint.SizeRange.minInclusive(min)))
+                    maxLength.foreach(max => sizeRange = sizeRange.merge(TextConstraint.SizeRange.maxInclusive(max)))
+                    val newSize   = if sizeRange.isEmpty then None else Some(sizeRange)
+                    TextValue(constraints.copy(size = newSize), default)
                 case other                           => other
 
             // Numeric range facets
@@ -293,24 +296,25 @@ object XsdImporter:
 
             currentSchema = currentSchema match
                 case NumericValue(constraints, default) =>
-                    var newConstraints = constraints
-                    minInclusive.foreach(min => newConstraints = newConstraints :+ NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, min)))
-                    maxInclusive.foreach(max => newConstraints = newConstraints :+ NumericConstraint.Value(BoundConstraint(BoundOp.MaxInclusive, max)))
+                    var valueRange = constraints.value.getOrElse(NumericConstraint.ValueRange())
+                    minInclusive.foreach(min => valueRange = valueRange.merge(NumericConstraint.ValueRange.minInclusive(min)))
+                    maxInclusive.foreach(max => valueRange = valueRange.merge(NumericConstraint.ValueRange.maxInclusive(max)))
                     minExclusive.foreach { min =>
                         currentCtx = currentCtx.addApproximation(
                             "XSD minExclusive converted to minInclusive with epsilon adjustment",
                             Some("Consider manual adjustment if precision matters")
                         )
-                        newConstraints = newConstraints :+ NumericConstraint.Value(BoundConstraint(BoundOp.MinExclusive, min))
+                        valueRange = valueRange.merge(NumericConstraint.ValueRange.minExclusive(min))
                     }
                     maxExclusive.foreach { max =>
                         currentCtx = currentCtx.addApproximation(
                             "XSD maxExclusive converted to maxInclusive with epsilon adjustment",
                             Some("Consider manual adjustment if precision matters")
                         )
-                        newConstraints = newConstraints :+ NumericConstraint.Value(BoundConstraint(BoundOp.MaxExclusive, max))
+                        valueRange = valueRange.merge(NumericConstraint.ValueRange.maxExclusive(max))
                     }
-                    NumericValue(newConstraints, default)
+                    val newValue   = if valueRange.isEmpty then None else Some(valueRange)
+                    NumericValue(constraints.copy(value = newValue), default)
                 case other                              => other
 
             Right((currentSchema, currentCtx))

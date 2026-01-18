@@ -21,7 +21,7 @@ object AvroExporterSpec extends ZIOSpecDefault:
                 assertTrue(json.toString.contains("string"))
             ,
             test("exports integer as int"):
-                val schema         = ObjectValue(Map(MandatoryLabel("field") -> NumericValue(Seq(NumericConstraint.Integer))))
+                val schema         = ObjectValue(Map(MandatoryLabel("field") -> NumericValue(NumericConstraint.Constraints(integer = true))))
                 val (json, report) = AvroExporter.toAvro(schema)
                 assertTrue(json.toString.contains("int"))
             ,
@@ -40,7 +40,7 @@ object AvroExporterSpec extends ZIOSpecDefault:
                 val schema         = ObjectValue(
                     Map(
                         MandatoryLabel("name") -> TextValue(),
-                        MandatoryLabel("age")  -> NumericValue(Seq(NumericConstraint.Integer))
+                        MandatoryLabel("age")  -> NumericValue(NumericConstraint.Constraints(integer = true))
                     )
                 )
                 val (json, report) = AvroExporter.toAvro(schema, "Person")
@@ -72,7 +72,7 @@ object AvroExporterSpec extends ZIOSpecDefault:
                 )
             ,
             test("exports map"):
-                val schema         = MapValue(NumericValue(Seq(NumericConstraint.Integer)))
+                val schema         = MapValue(NumericValue(NumericConstraint.Constraints(integer = true)))
                 val (json, report) = AvroExporter.toAvro(schema)
                 assertTrue(
                     json.toString.contains("map") &&
@@ -117,7 +117,7 @@ object AvroExporterSpec extends ZIOSpecDefault:
         ),
         suite("Alternatives and unions")(
             test("exports alternative values as union"):
-                val schema         = AlternativeValues(TextValue(), NumericValue(Seq(NumericConstraint.Integer)))
+                val schema         = AlternativeValues(TextValue(), NumericValue(NumericConstraint.Constraints(integer = true)))
                 val (json, report) = AvroExporter.toAvro(schema)
                 assertTrue(json.toString.contains("[\"string\",\"int\"]"))
         ),
@@ -133,7 +133,7 @@ object AvroExporterSpec extends ZIOSpecDefault:
                 )
             ,
             test("reports friction for text constraints"):
-                val schema         = ObjectValue(Map(MandatoryLabel("field") -> TextValue(Seq(TextConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 5))))))
+                val schema         = ObjectValue(Map(MandatoryLabel("field") -> TextValue(TextConstraint.Constraints(size = Some(TextConstraint.SizeRange.minInclusive(5))))))
                 val (json, report) = AvroExporter.toAvro(schema)
                 assertTrue(
                     report.entries.exists(e =>
@@ -143,7 +143,7 @@ object AvroExporterSpec extends ZIOSpecDefault:
                 )
             ,
             test("reports friction for numeric value constraints"):
-                val schema         = ObjectValue(Map(MandatoryLabel("field") -> NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, BigDecimal(0)))))))
+                val schema         = ObjectValue(Map(MandatoryLabel("field") -> NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.minInclusive(BigDecimal(0)))))))
                 val (json, report) = AvroExporter.toAvro(schema)
                 assertTrue(
                     report.entries.exists(e =>

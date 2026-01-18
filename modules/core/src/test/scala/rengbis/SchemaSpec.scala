@@ -10,6 +10,40 @@ object SchemaSpec extends ZIOSpecDefault:
     def parse(text: String): Either[String, Schema]    = SchemaLoader.parseSchema(text).map(s => s.root.get)
     def parseTest(text: String, expectedValue: Schema) = test(text) { assertTrue(parse(text) == Right(expectedValue)) }
 
+    // Helper methods to create constrained values
+    def textWithSize(size: TextConstraint.SizeRange): TextValue =
+        TextValue(TextConstraint.Constraints(size = Some(size)))
+
+    def numWithValue(value: NumericConstraint.ValueRange): NumericValue =
+        NumericValue(NumericConstraint.Constraints(value = Some(value)))
+
+    def numInteger: NumericValue =
+        NumericValue(NumericConstraint.Constraints(integer = true))
+
+    def numIntegerWithValue(value: NumericConstraint.ValueRange): NumericValue =
+        NumericValue(NumericConstraint.Constraints(value = Some(value), integer = true))
+
+    def listWithSize(schema: Schema, size: ListConstraint.SizeRange): ListOfValues =
+        ListOfValues(schema, ListConstraint.Constraints(size = Some(size)))
+
+    def listWithUnique(schema: Schema): ListOfValues =
+        ListOfValues(schema, ListConstraint.Constraints(unique = Seq(ListConstraint.Uniqueness.Simple)))
+
+    def listWithSizeAndUnique(schema: Schema, size: ListConstraint.SizeRange): ListOfValues =
+        ListOfValues(schema, ListConstraint.Constraints(size = Some(size), unique = Seq(ListConstraint.Uniqueness.Simple)))
+
+    def listWithUniqueByFields(schema: Schema, fields: Seq[String]): ListOfValues =
+        ListOfValues(schema, ListConstraint.Constraints(unique = Seq(ListConstraint.Uniqueness.ByFields(fields))))
+
+    def binWithSize(size: BinaryConstraint.SizeRange): BinaryValue =
+        BinaryValue(BinaryConstraint.Constraints(size = Some(size)))
+
+    def binWithEncoding(enc: BinaryConstraint.BinaryToTextEncoder): BinaryValue =
+        BinaryValue(BinaryConstraint.Constraints(encoding = Some(enc)))
+
+    def binWithEncodingAndSize(enc: BinaryConstraint.BinaryToTextEncoder, size: BinaryConstraint.SizeRange): BinaryValue =
+        BinaryValue(BinaryConstraint.Constraints(encoding = Some(enc), size = Some(size)))
+
     def spec = suite("Schema parsing features")(
         suite("Basic types")(
             parseTest("= any", AnyValue()),
@@ -26,9 +60,9 @@ object SchemaSpec extends ZIOSpecDefault:
         ),
         suite("List types")(
             parseTest("= number*", ListOfValues(NumericValue())),
-            parseTest("= number+", ListOfValues(NumericValue(), listSize >= 1)),
+            parseTest("= number+", listWithSize(NumericValue(), listSize >= 1)),
             parseTest("= text*", ListOfValues(TextValue())),
-            parseTest("""= text [ 10 <= length <= 100 ]*""", ListOfValues(TextValue(textLength >= 10, textLength <= 100)))
+            parseTest("""= text [ 10 <= length <= 100 ]*""", ListOfValues(textWithSize((textLength >= 10).merge(textLength <= 100))))
         ),
         suite("Alternative types")(
             parseTest("= text | number", AlternativeValues(TextValue(), NumericValue())),
@@ -51,88 +85,87 @@ object SchemaSpec extends ZIOSpecDefault:
             parseTest("""= "yes" | "no" """, EnumValues("yes", "no"))
         ),
         suite("Text constraints")(
-            parseTest("""= text [ length == 10 ]""", TextValue(textLength === 10)),
-            parseTest("""= text [ 10 <= length <= 100 ]""", TextValue(textLength >= 10, textLength <= 100)),
-            parseTest("""= text [ 10 < length < 100 ]""", TextValue(textLength > 10, textLength < 100)),
-            parseTest("""= text [ 10 < length <= 100 ]""", TextValue(textLength > 10, textLength <= 100)),
-            parseTest("""= text [ 10 <= length < 100 ]""", TextValue(textLength >= 10, textLength < 100)),
-            parseTest("""= text [ 10 <= length ]""", TextValue(textLength >= 10)),
-            parseTest("""= text [ 10 < length ]""", TextValue(textLength > 10)),
-            parseTest("""= text [ length >= 10 ]""", TextValue(textLength >= 10)),
-            parseTest("""= text [ length > 10 ]""", TextValue(textLength > 10)),
-            parseTest("""= text [ length <= 100 ]""", TextValue(textLength <= 100)),
-            parseTest("""= text [ length < 100 ]""", TextValue(textLength < 100))
+            parseTest("""= text [ length == 10 ]""", textWithSize(textLength === 10)),
+            parseTest("""= text [ 10 <= length <= 100 ]""", textWithSize((textLength >= 10).merge(textLength <= 100))),
+            parseTest("""= text [ 10 < length < 100 ]""", textWithSize((textLength > 10).merge(textLength < 100))),
+            parseTest("""= text [ 10 < length <= 100 ]""", textWithSize((textLength > 10).merge(textLength <= 100))),
+            parseTest("""= text [ 10 <= length < 100 ]""", textWithSize((textLength >= 10).merge(textLength < 100))),
+            parseTest("""= text [ 10 <= length ]""", textWithSize(textLength >= 10)),
+            parseTest("""= text [ 10 < length ]""", textWithSize(textLength > 10)),
+            parseTest("""= text [ length >= 10 ]""", textWithSize(textLength >= 10)),
+            parseTest("""= text [ length > 10 ]""", textWithSize(textLength > 10)),
+            parseTest("""= text [ length <= 100 ]""", textWithSize(textLength <= 100)),
+            parseTest("""= text [ length < 100 ]""", textWithSize(textLength < 100))
         ),
         suite("Number constraints")(
-            parseTest("""= number [ integer ]""", NumericValue(NumericConstraint.Integer)),
-            parseTest("""= number [ value >= 0 ]""", NumericValue(numValue >= 0)),
-            parseTest("""= number [ value > 0 ]""", NumericValue(numValue > 0)),
-            parseTest("""= number [ value <= 100 ]""", NumericValue(numValue <= 100)),
-            parseTest("""= number [ value < 100 ]""", NumericValue(numValue < 100)),
-            parseTest("""= number [ value == 42 ]""", NumericValue(numValue === 42)),
-            parseTest("""= number [ 0 <= value <= 100 ]""", NumericValue(numValue >= 0, numValue <= 100)),
-            parseTest("""= number [ 0 < value < 100 ]""", NumericValue(numValue > 0, numValue < 100)),
-            parseTest("""= number [ 0 < value <= 100 ]""", NumericValue(numValue > 0, numValue <= 100)),
-            parseTest("""= number [ 0 <= value < 100 ]""", NumericValue(numValue >= 0, numValue < 100)),
-            parseTest("""= number [ integer, value >= 0 ]""", NumericValue(NumericConstraint.Integer, numValue >= 0)),
-            parseTest("""= number [ integer, 1 <= value <= 12 ]""", NumericValue(NumericConstraint.Integer, numValue >= 1, numValue <= 12)),
-            parseTest("""= number [ value >= -10 ]""", NumericValue(numValue >= -10)),
-            parseTest("""= number [ value >= 0.5 ]""", NumericValue(numValue >= BigDecimal("0.5")))
+            parseTest("""= number [ integer ]""", numInteger),
+            parseTest("""= number [ value >= 0 ]""", numWithValue(numValue >= 0)),
+            parseTest("""= number [ value > 0 ]""", numWithValue(numValue > 0)),
+            parseTest("""= number [ value <= 100 ]""", numWithValue(numValue <= 100)),
+            parseTest("""= number [ value < 100 ]""", numWithValue(numValue < 100)),
+            parseTest("""= number [ value == 42 ]""", numWithValue(numValue === 42)),
+            parseTest("""= number [ 0 <= value <= 100 ]""", numWithValue((numValue >= 0).merge(numValue <= 100))),
+            parseTest("""= number [ 0 < value < 100 ]""", numWithValue((numValue > 0).merge(numValue < 100))),
+            parseTest("""= number [ 0 < value <= 100 ]""", numWithValue((numValue > 0).merge(numValue <= 100))),
+            parseTest("""= number [ 0 <= value < 100 ]""", numWithValue((numValue >= 0).merge(numValue < 100))),
+            parseTest("""= number [ integer, value >= 0 ]""", numIntegerWithValue(numValue >= 0)),
+            parseTest("""= number [ integer, 1 <= value <= 12 ]""", numIntegerWithValue((numValue >= 1).merge(numValue <= 12))),
+            parseTest("""= number [ value >= -10 ]""", numWithValue(numValue >= -10)),
+            parseTest("""= number [ value >= 0.5 ]""", numWithValue(numValue >= BigDecimal("0.5")))
         ),
         suite("Binary constraints")(
-            parseTest("""= binary [ encoding = 'base64' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64))),
-            parseTest("""= binary [ encoding = 'hex' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex))),
-            parseTest("""= binary [ bytes == 32 ]""", BinaryValue(binBytes === 32)),
-            parseTest("""= binary [ bytes >= 16 ]""", BinaryValue(binBytes >= 16)),
-            parseTest("""= binary [ bytes <= 256 ]""", BinaryValue(binBytes <= 256)),
-            parseTest("""= binary [ 16 <= bytes <= 64 ]""", BinaryValue(binBytes >= 16, binBytes <= 64)),
-            parseTest("""= binary [ 16 <= KB <= 64 ]""", BinaryValue(binBytes >= 16384, binBytes <= 65536)),
+            parseTest("""= binary [ encoding = 'base64' ]""", binWithEncoding(BinaryConstraint.BinaryToTextEncoder.base64)),
+            parseTest("""= binary [ encoding = 'hex' ]""", binWithEncoding(BinaryConstraint.BinaryToTextEncoder.hex)),
+            parseTest("""= binary [ bytes == 32 ]""", binWithSize(binBytes === 32)),
+            parseTest("""= binary [ bytes >= 16 ]""", binWithSize(binBytes >= 16)),
+            parseTest("""= binary [ bytes <= 256 ]""", binWithSize(binBytes <= 256)),
+            parseTest("""= binary [ 16 <= bytes <= 64 ]""", binWithSize((binBytes >= 16).merge(binBytes <= 64))),
+            parseTest("""= binary [ 16 <= KB <= 64 ]""", binWithSize((binBytes >= 16384).merge(binBytes <= 65536))),
             parseTest(
                 """= binary [ encoding = 'base64', bytes == 32 ]""",
-                BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64), binBytes === 32)
+                binWithEncodingAndSize(BinaryConstraint.BinaryToTextEncoder.base64, binBytes === 32)
             ),
             parseTest(
                 """= binary [ encoding = 'hex', 8 <= bytes <= 64 ]""",
-                BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex), binBytes >= 8, binBytes <= 64)
+                binWithEncodingAndSize(BinaryConstraint.BinaryToTextEncoder.hex, (binBytes >= 8).merge(binBytes <= 64))
             )
         ),
         suite("List constraints")(
-            parseTest("""= text* [ size == 10 ]""", ListOfValues(TextValue(), listSize === 10)),
-            parseTest("""= text [ 10 <= length <= 100 ]* [ size == 10 ]""", ListOfValues(TextValue(textLength >= 10, textLength <= 100), listSize === 10)),
-            parseTest("""= text* [ size == 5 ]""", ListOfValues(TextValue(), listSize === 5)),
-            parseTest("""= text* [ size >= 2 ]""", ListOfValues(TextValue(), listSize >= 2)),
-            parseTest("""= text* [ size > 2 ]""", ListOfValues(TextValue(), listSize > 2)),
-            parseTest("""= text* [ size <= 10 ]""", ListOfValues(TextValue(), listSize <= 10)),
-            parseTest("""= text* [ size < 10 ]""", ListOfValues(TextValue(), listSize < 10)),
-            parseTest("""= text* [ 2 <= size <= 5 ]""", ListOfValues(TextValue(), listSize >= 2, listSize <= 5)),
-            parseTest("""= text* [ 2 < size < 10 ]""", ListOfValues(TextValue(), listSize > 2, listSize < 10)),
-            parseTest("""= text* [ 2 <= size ]""", ListOfValues(TextValue(), listSize >= 2))
+            parseTest("""= text* [ size == 10 ]""", listWithSize(TextValue(), listSize === 10)),
+            parseTest("""= text [ 10 <= length <= 100 ]* [ size == 10 ]""", listWithSize(textWithSize((textLength >= 10).merge(textLength <= 100)), listSize === 10)),
+            parseTest("""= text* [ size == 5 ]""", listWithSize(TextValue(), listSize === 5)),
+            parseTest("""= text* [ size >= 2 ]""", listWithSize(TextValue(), listSize >= 2)),
+            parseTest("""= text* [ size > 2 ]""", listWithSize(TextValue(), listSize > 2)),
+            parseTest("""= text* [ size <= 10 ]""", listWithSize(TextValue(), listSize <= 10)),
+            parseTest("""= text* [ size < 10 ]""", listWithSize(TextValue(), listSize < 10)),
+            parseTest("""= text* [ 2 <= size <= 5 ]""", listWithSize(TextValue(), (listSize >= 2).merge(listSize <= 5))),
+            parseTest("""= text* [ 2 < size < 10 ]""", listWithSize(TextValue(), (listSize > 2).merge(listSize < 10))),
+            parseTest("""= text* [ 2 <= size ]""", listWithSize(TextValue(), listSize >= 2))
         ),
         suite("List uniqueness constraints")(
-            parseTest("""= text* [ unique ]""", ListOfValues(TextValue(), ListConstraint.Unique)),
-            parseTest("""= number+ [ unique ]""", ListOfValues(NumericValue(), listSize >= 1, ListConstraint.Unique)),
-            parseTest("""= text* [ unique, size == 3 ]""", ListOfValues(TextValue(), ListConstraint.Unique, listSize === 3)),
-            parseTest("""= text* [ unique, 2 <= size <= 5 ]""", ListOfValues(TextValue(), ListConstraint.Unique, listSize >= 2, listSize <= 5)),
+            parseTest("""= text* [ unique ]""", listWithUnique(TextValue())),
+            parseTest("""= number+ [ unique ]""", listWithSizeAndUnique(NumericValue(), listSize >= 1)),
+            parseTest("""= text* [ unique, size == 3 ]""", listWithSizeAndUnique(TextValue(), listSize === 3)),
+            parseTest("""= text* [ unique, 2 <= size <= 5 ]""", listWithSizeAndUnique(TextValue(), (listSize >= 2).merge(listSize <= 5))),
             parseTest(
                 """= { id: text }* [ unique = id ]""",
-                ListOfValues(ObjectValue(Map(MandatoryLabel("id") -> TextValue())), ListConstraint.UniqueByFields(Seq("id")))
+                listWithUniqueByFields(ObjectValue(Map(MandatoryLabel("id") -> TextValue())), Seq("id"))
             ),
             parseTest(
                 """= { id: text, name: text }* [ unique = (id, name) ]""",
-                ListOfValues(
+                listWithUniqueByFields(
                     ObjectValue(Map(MandatoryLabel("id") -> TextValue(), MandatoryLabel("name") -> TextValue())),
-                    ListConstraint.UniqueByFields(Seq("id", "name"))
+                    Seq("id", "name")
                 )
             ),
             parseTest(
                 """= { id: text, code: text }* [ unique = id, unique = code ]""",
                 ListOfValues(
                     ObjectValue(Map(MandatoryLabel("id") -> TextValue(), MandatoryLabel("code") -> TextValue())),
-                    ListConstraint.UniqueByFields(Seq("id")),
-                    ListConstraint.UniqueByFields(Seq("code"))
+                    ListConstraint.Constraints(unique = Seq(ListConstraint.Uniqueness.ByFields(Seq("id")), ListConstraint.Uniqueness.ByFields(Seq("code"))))
                 )
             ),
-            parseTest("""= text* [ unique, 2 <= size <= 5 ]""", ListOfValues(TextValue(), ListConstraint.Unique, listSize >= 2, listSize <= 5))
+            parseTest("""= text* [ unique, 2 <= size <= 5 ]""", listWithSizeAndUnique(TextValue(), (listSize >= 2).merge(listSize <= 5)))
         ),
         suite("Object types")(
             test("simple JSON/Yaml structure"):
@@ -289,8 +322,8 @@ object SchemaSpec extends ZIOSpecDefault:
                 assertTrue(
                     parse(schemaDefinition) == Right(
                         TupleValue(
-                            TextValue(textLength >= 10, textLength <= 100),
-                            TextValue(textLength <= 10),
+                            textWithSize((textLength >= 10).merge(textLength <= 100)),
+                            textWithSize(textLength <= 10),
                             NumericValue()
                         )
                     )
@@ -301,7 +334,7 @@ object SchemaSpec extends ZIOSpecDefault:
                 val schemaDefinition = """= text ?= "active""""
                 assertTrue(
                     parse(schemaDefinition) == Right(
-                        TextValue(Seq.empty, Some("active"))
+                        TextValue(TextConstraint.Constraints(), Some("active"))
                     )
                 )
             ,
@@ -309,7 +342,7 @@ object SchemaSpec extends ZIOSpecDefault:
                 val schemaDefinition = """= text [ length <= 100 ] ?= "default""""
                 assertTrue(
                     parse(schemaDefinition) == Right(
-                        TextValue(Seq(textLength <= 100), Some("default"))
+                        TextValue(TextConstraint.Constraints(size = Some(textLength <= 100)), Some("default"))
                     )
                 )
             ,
@@ -317,7 +350,7 @@ object SchemaSpec extends ZIOSpecDefault:
                 val schemaDefinition = """= number ?= 0"""
                 assertTrue(
                     parse(schemaDefinition) == Right(
-                        NumericValue(Seq.empty, Some(BigDecimal(0)))
+                        NumericValue(NumericConstraint.Constraints(), Some(BigDecimal(0)))
                     )
                 )
             ,
@@ -325,7 +358,7 @@ object SchemaSpec extends ZIOSpecDefault:
                 val schemaDefinition = """= number [ integer, value >= 0 ] ?= 42"""
                 assertTrue(
                     parse(schemaDefinition) == Right(
-                        NumericValue(Seq(NumericConstraint.Integer, numValue >= 0), Some(BigDecimal(42)))
+                        NumericValue(NumericConstraint.Constraints(value = Some(numValue >= 0), integer = true), Some(BigDecimal(42)))
                     )
                 )
             ,
@@ -338,8 +371,8 @@ object SchemaSpec extends ZIOSpecDefault:
                     parse(schemaDefinition) == Right(
                         ObjectValue(
                             Map(
-                                MandatoryLabel("status") -> TextValue(Seq.empty, Some("active")),
-                                MandatoryLabel("count")  -> NumericValue(Seq(NumericConstraint.Integer), Some(BigDecimal(0)))
+                                MandatoryLabel("status") -> TextValue(TextConstraint.Constraints(), Some("active")),
+                                MandatoryLabel("count")  -> NumericValue(NumericConstraint.Constraints(integer = true), Some(BigDecimal(0)))
                             )
                         )
                     )

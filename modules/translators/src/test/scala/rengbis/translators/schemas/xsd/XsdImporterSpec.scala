@@ -56,10 +56,7 @@ object XsdImporterSpec extends ZIOSpecDefault:
                     result.isRight,
                     result.map(_._1).exists {
                         case TextValue(constraints, _) =>
-                            constraints.exists {
-                                case TextConstraint.Format("iso8601-datetime") => true
-                                case _                                         => false
-                            }
+                            constraints.format.contains("iso8601-datetime")
                         case _                         => false
                     }
                 )
@@ -83,11 +80,7 @@ object XsdImporterSpec extends ZIOSpecDefault:
                     result.isRight,
                     result.map(_._1).exists {
                         case TextValue(constraints, _) =>
-                            constraints.exists {
-                                case TextConstraint.Size(bound) =>
-                                    bound.isMinInclusive && bound.value == 3
-                                case _                          => false
-                            }
+                            constraints.size.exists(s => s.min.exists(b => b.isMinInclusive && b.value == 3))
                         case _                         => false
                     }
                 )
@@ -109,10 +102,7 @@ object XsdImporterSpec extends ZIOSpecDefault:
                     result.isRight,
                     result.map(_._1).exists {
                         case TextValue(constraints, _) =>
-                            constraints.exists {
-                                case TextConstraint.Regex("[a-z]+") => true
-                                case _                              => false
-                            }
+                            constraints.regex.contains("[a-z]+")
                         case _                         => false
                     }
                 )
@@ -135,16 +125,8 @@ object XsdImporterSpec extends ZIOSpecDefault:
                     result.isRight,
                     result.map(_._1).exists {
                         case NumericValue(constraints, _) =>
-                            val hasMin = constraints.exists {
-                                case NumericConstraint.Value(bound) =>
-                                    bound.isMinInclusive && bound.value == BigDecimal(1)
-                                case _                              => false
-                            }
-                            val hasMax = constraints.exists {
-                                case NumericConstraint.Value(bound) =>
-                                    bound.isMaxInclusive && bound.value == BigDecimal(100)
-                                case _                              => false
-                            }
+                            val hasMin = constraints.value.exists(v => v.min.exists(b => b.isMinInclusive && b.value == BigDecimal(1)))
+                            val hasMax = constraints.value.exists(v => v.max.exists(b => b.isMaxInclusive && b.value == BigDecimal(100)))
                             hasMin && hasMax
                         case _                            => false
                     }
@@ -266,8 +248,8 @@ object XsdImporterSpec extends ZIOSpecDefault:
                     result.map(_._1).exists {
                         case ObjectValue(fields) =>
                             fields.get(MandatoryLabel("item")).exists {
-                                case ListOfValues(_, _*) => true
-                                case _                   => false
+                                case ListOfValues(_, _) => true
+                                case _                  => false
                             }
                         case _                   => false
                     }
@@ -291,13 +273,9 @@ object XsdImporterSpec extends ZIOSpecDefault:
                     result.map(_._1).exists {
                         case ObjectValue(fields) =>
                             fields.get(MandatoryLabel("item")).exists {
-                                case ListOfValues(_, constraints @ _*) =>
-                                    constraints.exists {
-                                        case ListConstraint.Size(bound) =>
-                                            bound.isMinInclusive && bound.value == 1
-                                        case _                          => false
-                                    }
-                                case _                                 => false
+                                case ListOfValues(_, constraints) =>
+                                    constraints.size.exists(s => s.min.exists(b => b.isMinInclusive && b.value == 1))
+                                case _                            => false
                             }
                         case _                   => false
                     }
@@ -321,10 +299,7 @@ object XsdImporterSpec extends ZIOSpecDefault:
                     result.isRight,
                     result.map(_._1).exists {
                         case TextValue(constraints, _) =>
-                            constraints.exists {
-                                case TextConstraint.Regex("[^@]+@[^@]+") => true
-                                case _                                   => false
-                            }
+                            constraints.regex.contains("[^@]+@[^@]+")
                         case _                         => false
                     }
                 )

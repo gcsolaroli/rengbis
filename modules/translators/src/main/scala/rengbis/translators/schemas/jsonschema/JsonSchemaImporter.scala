@@ -172,7 +172,7 @@ object JsonSchemaImporter:
             })
             .orElse(fields.get("const").map {
                 case Json.Str(value) => Right((GivenTextValue(value), context))
-                case Json.Num(value) => Right((NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.Exact, value))), None), context))
+                case Json.Num(value) => Right((NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.exact(BigDecimal(value)))), None), context))
                 case _               =>
                     val ctx = context.addLoss("const with non-string/number value not supported", None)
                     Right((AnyValue(), ctx))
@@ -189,62 +189,66 @@ object JsonSchemaImporter:
             .getOrElse(Right((AnyValue(), context)))
 
     private def translateString(fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
-        var constraints = Seq.empty[TextConstraint.Constraint]
-        var currentCtx  = context
-        var default     = Option.empty[String]
+        var sizeRange  = Option.empty[TextConstraint.SizeRange]
+        var regex      = Option.empty[String]
+        var format     = Option.empty[String]
+        var currentCtx = context
+        var default    = Option.empty[String]
 
         // minLength
         fields.get("minLength") match
             case Some(Json.Num(min)) =>
-                constraints = constraints :+ TextConstraint.Size(BoundConstraint(BoundOp.MinInclusive, BigDecimal(min).toInt))
+                val minRange = TextConstraint.SizeRange.minInclusive(BigDecimal(min).toInt)
+                sizeRange = Some(sizeRange.map(_.merge(minRange)).getOrElse(minRange))
             case _                   => ()
 
         // maxLength
         fields.get("maxLength") match
             case Some(Json.Num(max)) =>
-                constraints = constraints :+ TextConstraint.Size(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(max).toInt))
+                val maxRange = TextConstraint.SizeRange.maxInclusive(BigDecimal(max).toInt)
+                sizeRange = Some(sizeRange.map(_.merge(maxRange)).getOrElse(maxRange))
             case _                   => ()
 
         // pattern
         fields.get("pattern") match
             case Some(Json.Str(pattern)) =>
-                constraints = constraints :+ TextConstraint.Regex(pattern)
+                regex = Some(pattern)
             case _                       => ()
 
         // format - check for special types first
         fields.get("format") match
-            case Some(Json.Str(format)) =>
-                format.toLowerCase match
+            case Some(Json.Str(fmt)) =>
+                fmt.toLowerCase match
                     case "date-time" | "date" | "time"                           =>
                         // This is actually a time value, not text
-                        translateTimeFormat(format, currentCtx)
+                        translateTimeFormat(fmt, currentCtx)
                     case "byte"                                                  =>
                         // base64-encoded binary
-                        Right((BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64)), currentCtx))
+                        Right((BinaryValue(BinaryConstraint.Constraints(encoding = Some(BinaryConstraint.BinaryToTextEncoder.base64))), currentCtx))
                     case "email" | "uri" | "uuid" | "ipv4" | "ipv6" | "hostname" =>
-                        constraints = constraints :+ TextConstraint.Format(format.toLowerCase)
+                        format = Some(fmt.toLowerCase)
                         // default
                         fields.get("default") match
                             case Some(Json.Str(value)) => default = Some(value)
                             case _                     => ()
-                        Right((TextValue(constraints, default), currentCtx))
+                        Right((TextValue(TextConstraint.Constraints(size = sizeRange, regex = regex, format = format), default), currentCtx))
                     case other                                                   =>
                         currentCtx = currentCtx.addExtension(
                             s"Custom format '$other' may not be supported",
                             Some("Standard formats: email, uri, uuid, ipv4, ipv6, hostname")
                         )
-                        constraints = constraints :+ TextConstraint.Format(other)
+                        format = Some(other)
                         // default
                         fields.get("default") match
                             case Some(Json.Str(value)) => default = Some(value)
                             case _                     => ()
-                        Right((TextValue(constraints, default), currentCtx))
-            case _                      =>
+                        Right((TextValue(TextConstraint.Constraints(size = sizeRange, regex = regex, format = format), default), currentCtx))
+            case _                   =>
                 // default
                 fields.get("default") match
                     case Some(Json.Str(value)) => default = Some(value)
                     case _                     => ()
-                Right((TextValue(constraints, default), currentCtx))
+                Right((TextValue(TextConstraint.Constraints(size = sizeRange, regex = regex, format = format), default), currentCtx))
 
     private def translateTimeFormat(format: String, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         val timeFormat = format.toLowerCase match
@@ -256,34 +260,36 @@ object JsonSchemaImporter:
         Right((TimeValue(timeFormat), context))
 
     private def translateNumber(fields: Map[String, Json], context: TranslationContext, isInteger: Boolean): Either[String, (Schema, TranslationContext)] =
-        var constraints = Seq.empty[NumericConstraint.Constraint]
-        var currentCtx  = context
-        var default     = Option.empty[BigDecimal]
-
-        if isInteger then constraints = constraints :+ NumericConstraint.Integer
+        var valueRange = Option.empty[NumericConstraint.ValueRange]
+        var currentCtx = context
+        var default    = Option.empty[BigDecimal]
 
         // minimum
         fields.get("minimum") match
             case Some(Json.Num(min)) =>
-                constraints = constraints :+ NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, min))
+                val minRange = NumericConstraint.ValueRange.minInclusive(BigDecimal(min))
+                valueRange = Some(valueRange.map(_.merge(minRange)).getOrElse(minRange))
             case _                   => ()
 
         // maximum
         fields.get("maximum") match
             case Some(Json.Num(max)) =>
-                constraints = constraints :+ NumericConstraint.Value(BoundConstraint(BoundOp.MaxInclusive, max))
+                val maxRange = NumericConstraint.ValueRange.maxInclusive(BigDecimal(max))
+                valueRange = Some(valueRange.map(_.merge(maxRange)).getOrElse(maxRange))
             case _                   => ()
 
         // exclusiveMinimum
         fields.get("exclusiveMinimum") match
             case Some(Json.Num(min)) =>
-                constraints = constraints :+ NumericConstraint.Value(BoundConstraint(BoundOp.MinExclusive, min))
+                val minRange = NumericConstraint.ValueRange.minExclusive(BigDecimal(min))
+                valueRange = Some(valueRange.map(_.merge(minRange)).getOrElse(minRange))
             case _                   => ()
 
         // exclusiveMaximum
         fields.get("exclusiveMaximum") match
             case Some(Json.Num(max)) =>
-                constraints = constraints :+ NumericConstraint.Value(BoundConstraint(BoundOp.MaxExclusive, max))
+                val maxRange = NumericConstraint.ValueRange.maxExclusive(BigDecimal(max))
+                valueRange = Some(valueRange.map(_.merge(maxRange)).getOrElse(maxRange))
             case _                   => ()
 
         // multipleOf
@@ -297,21 +303,23 @@ object JsonSchemaImporter:
 
         // default
         fields.get("default") match
-            case Some(Json.Num(value)) => default = Some(value)
+            case Some(Json.Num(value)) => default = Some(BigDecimal(value))
             case _                     => ()
 
-        Right((NumericValue(constraints, default), currentCtx))
+        Right((NumericValue(NumericConstraint.Constraints(value = valueRange, integer = isInteger), default), currentCtx))
 
     private def translateArray(fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         var currentCtx = context
 
         // Check for tuple (prefixItems) - handle early
-        val tupleResult = fields.get("prefixItems").flatMap:
-            case Json.Arr(items) =>
-                fields.get("items") match
-                    case Some(Json.Bool(false)) | None => Some(translateTuple(items.toList, currentCtx))
-                    case _                             => None
-            case _               => None
+        val tupleResult = fields
+            .get("prefixItems")
+            .flatMap:
+                case Json.Arr(items) =>
+                    fields.get("items") match
+                        case Some(Json.Bool(false)) | None => Some(translateTuple(items.toList, currentCtx))
+                        case _                             => None
+                case _               => None
 
         tupleResult.getOrElse:
             // Regular array with items
@@ -321,24 +329,27 @@ object JsonSchemaImporter:
                         case Left(error)          => Left(error)
                         case Right((schema, ctx)) =>
                             currentCtx = ctx
-                            var constraints = Seq.empty[ListConstraint.Constraint]
+                            var sizeRange  = Option.empty[ListConstraint.SizeRange]
+                            var uniqueness = Seq.empty[ListConstraint.Uniqueness]
 
                             // minItems
                             fields.get("minItems") match
                                 case Some(Json.Num(min)) =>
-                                    constraints = constraints :+ ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, BigDecimal(min).toInt))
+                                    val minRange = ListConstraint.SizeRange.minInclusive(BigDecimal(min).toInt)
+                                    sizeRange = Some(sizeRange.map(_.merge(minRange)).getOrElse(minRange))
                                 case _                   => ()
 
                             // maxItems
                             fields.get("maxItems") match
                                 case Some(Json.Num(max)) =>
-                                    constraints = constraints :+ ListConstraint.Size(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(max).toInt))
+                                    val maxRange = ListConstraint.SizeRange.maxInclusive(BigDecimal(max).toInt)
+                                    sizeRange = Some(sizeRange.map(_.merge(maxRange)).getOrElse(maxRange))
                                 case _                   => ()
 
                             // uniqueItems
                             fields.get("uniqueItems") match
                                 case Some(Json.Bool(true)) =>
-                                    constraints = constraints :+ ListConstraint.Unique
+                                    uniqueness = Seq(ListConstraint.Uniqueness.Simple)
                                 case _                     => ()
 
                             // contains/minContains/maxContains
@@ -348,7 +359,7 @@ object JsonSchemaImporter:
                                     Some("Use custom validation")
                                 )
 
-                            Right((ListOfValues(schema, constraints*), currentCtx))
+                            Right((ListOfValues(schema, ListConstraint.Constraints(size = sizeRange, unique = uniqueness)), currentCtx))
                 case None             =>
                     // Array without items constraint - accepts any items
                     Right((ListOfValues(AnyValue()), currentCtx))

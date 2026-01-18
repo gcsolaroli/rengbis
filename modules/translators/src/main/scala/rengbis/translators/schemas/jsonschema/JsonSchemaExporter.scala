@@ -74,11 +74,11 @@ object JsonSchemaExporter:
             case Fail() =>
                 (Json.Obj("not" -> Json.Obj()), context.report) // Fail means reject everything
 
-            case BinaryValue(constraints @ _*) =>
+            case BinaryValue(constraints) =>
                 translateBinaryValue(constraints, context)
 
             // Container types
-            case ListOfValues(elementSchema, constraints @ _*) =>
+            case ListOfValues(elementSchema, constraints) =>
                 translateListOfValues(elementSchema, constraints, context)
 
             case TupleValue(elementSchemas @ _*) =>
@@ -114,33 +114,34 @@ object JsonSchemaExporter:
                 )
                 (Json.Obj(), ctx.report)
 
-    private def translateTextValue(constraints: Seq[TextConstraint.Constraint], default: Option[String], context: TranslationContext): (Json.Obj, FrictionReport) =
+    private def translateTextValue(constraints: TextConstraint.Constraints, default: Option[String], context: TranslationContext): (Json.Obj, FrictionReport) =
         var baseObj    = Json.Obj("type" -> Json.Str("string"))
         var currentCtx = context
 
-        constraints.foreach:
-            case TextConstraint.Regex(pattern) =>
-                baseObj = baseObj.add("pattern", Json.Str(pattern))
+        // Handle regex
+        constraints.regex.foreach(pattern => baseObj = baseObj.add("pattern", Json.Str(pattern)))
 
-            case TextConstraint.Format(format) =>
-                // Map common formats to JSON Schema formats
-                val jsonSchemaFormat = format.toLowerCase match
-                    case "email"    => Some("email")
-                    case "uri"      => Some("uri")
-                    case "uuid"     => Some("uuid")
-                    case "ipv4"     => Some("ipv4")
-                    case "ipv6"     => Some("ipv6")
-                    case "hostname" => Some("hostname")
-                    case _          =>
-                        currentCtx = currentCtx.addExtension(
-                            s"Custom text format '$format' requires JSON Schema extension",
-                            Some("Consider using pattern constraint instead")
-                        )
-                        None
+        // Handle format
+        constraints.format.foreach { format =>
+            val jsonSchemaFormat = format.toLowerCase match
+                case "email"    => Some("email")
+                case "uri"      => Some("uri")
+                case "uuid"     => Some("uuid")
+                case "ipv4"     => Some("ipv4")
+                case "ipv6"     => Some("ipv6")
+                case "hostname" => Some("hostname")
+                case _          =>
+                    currentCtx = currentCtx.addExtension(
+                        s"Custom text format '$format' requires JSON Schema extension",
+                        Some("Consider using pattern constraint instead")
+                    )
+                    None
+            jsonSchemaFormat.foreach(f => baseObj = baseObj.add("format", Json.Str(f)))
+        }
 
-                jsonSchemaFormat.foreach(f => baseObj = baseObj.add("format", Json.Str(f)))
-
-            case TextConstraint.Size(bound) =>
+        // Handle size constraints
+        constraints.size.foreach { sizeRange =>
+            sizeRange.min.foreach { bound =>
                 bound.op match
                     case BoundOp.Exact        =>
                         baseObj = baseObj.add("minLength", Json.Num(bound.value))
@@ -149,26 +150,29 @@ object JsonSchemaExporter:
                         baseObj = baseObj.add("minLength", Json.Num(bound.value))
                     case BoundOp.MinExclusive =>
                         baseObj = baseObj.add("minLength", Json.Num(bound.value + 1))
+                    case _                    => ()
+            }
+            sizeRange.max.foreach { bound =>
+                bound.op match
                     case BoundOp.MaxInclusive =>
                         baseObj = baseObj.add("maxLength", Json.Num(bound.value))
                     case BoundOp.MaxExclusive =>
                         baseObj = baseObj.add("maxLength", Json.Num(bound.value - 1))
+                    case _                    => ()
+            }
+        }
 
         default.foreach(d => baseObj = baseObj.add("default", Json.Str(d)))
 
         (baseObj, currentCtx.report)
 
-    private def translateNumericValue(constraints: Seq[NumericConstraint.Constraint], default: Option[BigDecimal], context: TranslationContext): (Json.Obj, FrictionReport) =
-        var baseObj    = Json.Obj("type" -> Json.Str("number"))
+    private def translateNumericValue(constraints: NumericConstraint.Constraints, default: Option[BigDecimal], context: TranslationContext): (Json.Obj, FrictionReport) =
+        var baseObj    = if constraints.integer then Json.Obj("type" -> Json.Str("integer")) else Json.Obj("type" -> Json.Str("number"))
         var currentCtx = context
-        var isInteger  = false
 
-        constraints.foreach:
-            case NumericConstraint.Integer =>
-                baseObj = Json.Obj("type" -> Json.Str("integer"))
-                isInteger = true
-
-            case NumericConstraint.Value(bound) =>
+        // Handle value constraints
+        constraints.value.foreach { valueRange =>
+            valueRange.min.foreach { bound =>
                 bound.op match
                     case BoundOp.Exact        =>
                         baseObj = baseObj.add("const", Json.Num(bound.value))
@@ -176,10 +180,17 @@ object JsonSchemaExporter:
                         baseObj = baseObj.add("minimum", Json.Num(bound.value))
                     case BoundOp.MinExclusive =>
                         baseObj = baseObj.add("exclusiveMinimum", Json.Num(bound.value))
+                    case _                    => ()
+            }
+            valueRange.max.foreach { bound =>
+                bound.op match
                     case BoundOp.MaxInclusive =>
                         baseObj = baseObj.add("maximum", Json.Num(bound.value))
                     case BoundOp.MaxExclusive =>
                         baseObj = baseObj.add("exclusiveMaximum", Json.Num(bound.value))
+                    case _                    => ()
+            }
+        }
 
         default.foreach(d => baseObj = baseObj.add("default", Json.Num(d)))
 
@@ -213,38 +224,42 @@ object JsonSchemaExporter:
 
         (baseObj, currentCtx.report)
 
-    private def translateBinaryValue(constraints: Seq[BinaryConstraint.Constraint], context: TranslationContext): (Json.Obj, FrictionReport) =
+    private def translateBinaryValue(constraints: BinaryConstraint.Constraints, context: TranslationContext): (Json.Obj, FrictionReport) =
         var baseObj    = Json.Obj("type" -> Json.Str("string"))
         var currentCtx = context
 
-        constraints.foreach:
-            case BinaryConstraint.Encoding(encoder) =>
-                val format = encoder match
-                    case BinaryConstraint.BinaryToTextEncoder.base64 => "byte" // JSON Schema uses "byte" for base64
-                    case _                                           =>
-                        currentCtx = currentCtx.addApproximation(
-                            s"Binary encoding '${ encoder.code }' not natively supported in JSON Schema, using base64",
-                            Some("Consider using 'byte' format (base64)")
-                        )
-                        "byte"
-                baseObj = baseObj.add("format", Json.Str(format))
+        // Handle encoding
+        constraints.encoding.foreach { encoder =>
+            val format = encoder match
+                case BinaryConstraint.BinaryToTextEncoder.base64 => "byte" // JSON Schema uses "byte" for base64
+                case _                                           =>
+                    currentCtx = currentCtx.addApproximation(
+                        s"Binary encoding '${ encoder.code }' not natively supported in JSON Schema, using base64",
+                        Some("Consider using 'byte' format (base64)")
+                    )
+                    "byte"
+            baseObj = baseObj.add("format", Json.Str(format))
+        }
 
-            case BinaryConstraint.Size(bound, unit) =>
-                // JSON Schema doesn't have direct size constraints for binary data
-                currentCtx = currentCtx.addLoss(
-                    s"Binary size constraint (${ bound.value } ${ unit.symbol }) cannot be enforced in JSON Schema",
-                    Some("Add description or use custom validation")
-                )
+        // Handle size constraints
+        constraints.size.foreach { sizeRange =>
+            // JSON Schema doesn't have direct size constraints for binary data
+            currentCtx = currentCtx.addLoss(
+                "Binary size constraint cannot be enforced in JSON Schema",
+                Some("Add description or use custom validation")
+            )
+        }
 
         (baseObj, currentCtx.report)
 
-    private def translateListOfValues(elementSchema: Schema, constraints: Seq[ListConstraint.Constraint], context: TranslationContext): (Json.Obj, FrictionReport) =
+    private def translateListOfValues(elementSchema: Schema, constraints: ListConstraint.Constraints, context: TranslationContext): (Json.Obj, FrictionReport) =
         val (itemsJson, itemsReport) = translateSchema(elementSchema, context.atPath("items"))
         var baseObj                  = Json.Obj("type" -> Json.Str("array"), "items" -> itemsJson)
         var currentCtx               = context.copy(report = itemsReport)
 
-        constraints.foreach:
-            case ListConstraint.Size(bound) =>
+        // Handle size constraints
+        constraints.size.foreach { sizeRange =>
+            sizeRange.min.foreach { bound =>
                 bound.op match
                     case BoundOp.Exact        =>
                         baseObj = baseObj.add("minItems", Json.Num(bound.value))
@@ -253,15 +268,23 @@ object JsonSchemaExporter:
                         baseObj = baseObj.add("minItems", Json.Num(bound.value))
                     case BoundOp.MinExclusive =>
                         baseObj = baseObj.add("minItems", Json.Num(bound.value + 1))
+                    case _                    => ()
+            }
+            sizeRange.max.foreach { bound =>
+                bound.op match
                     case BoundOp.MaxInclusive =>
                         baseObj = baseObj.add("maxItems", Json.Num(bound.value))
                     case BoundOp.MaxExclusive =>
                         baseObj = baseObj.add("maxItems", Json.Num(bound.value - 1))
+                    case _                    => ()
+            }
+        }
 
-            case ListConstraint.Unique =>
+        // Handle uniqueness constraints
+        constraints.unique.foreach:
+            case ListConstraint.Uniqueness.Simple           =>
                 baseObj = baseObj.add("uniqueItems", Json.Bool(true))
-
-            case ListConstraint.UniqueByFields(fields) =>
+            case ListConstraint.Uniqueness.ByFields(fields) =>
                 currentCtx = currentCtx.addLoss(
                     s"UniqueByFields constraint (fields: ${ fields.mkString(", ") }) cannot be enforced in JSON Schema",
                     Some("Use custom validation or add description")

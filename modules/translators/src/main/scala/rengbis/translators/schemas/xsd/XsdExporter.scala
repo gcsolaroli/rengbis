@@ -139,7 +139,7 @@ object XsdExporter:
                 (Seq(restriction), newContext)
 
             // Container types
-            case ListOfValues(elementSchema, constraints @ _*) =>
+            case ListOfValues(elementSchema, constraints) =>
                 translateListOfValues(elementSchema, constraints, context)
 
             case TupleValue(elementSchemas @ _*) =>
@@ -172,38 +172,46 @@ object XsdExporter:
                 val newContext = context.addLoss(s"Unsupported schema type: ${ schema.getClass.getSimpleName }")
                 (Seq(elem("any")), newContext)
 
-    private def translateTextValue(constraints: Seq[TextConstraint.Constraint], default: Option[String], context: TranslationContext): (NodeSeq, TranslationContext) =
+    private def translateTextValue(constraints: TextConstraint.Constraints, default: Option[String], context: TranslationContext): (NodeSeq, TranslationContext) =
         var baseType   = "xs:string"
         var facets     = List.empty[Node]
         var newContext = context
 
-        constraints.foreach:
-            case TextConstraint.Size(bound) =>
+        // Handle size constraints
+        constraints.size.foreach { sizeRange =>
+            sizeRange.min.foreach { bound =>
                 if bound.isExact then facets = facets :+ elem("length", attr("value", bound.value.toString))
-                else
-                    if bound.isMinInclusive then facets = facets :+ elem("minLength", attr("value", bound.value.toString))
-                    if bound.isMaxInclusive then facets = facets :+ elem("maxLength", attr("value", bound.value.toString))
+                else if bound.isMinInclusive then facets = facets :+ elem("minLength", attr("value", bound.value.toString))
+            }
+            sizeRange.max.foreach { bound =>
+                if bound.isMaxInclusive then facets = facets :+ elem("maxLength", attr("value", bound.value.toString))
+            }
+        }
 
-            case TextConstraint.Regex(pattern) =>
-                facets = facets :+ elem("pattern", attr("value", pattern))
+        // Handle regex
+        constraints.regex.foreach { pattern =>
+            facets = facets :+ elem("pattern", attr("value", pattern))
+        }
 
-            case TextConstraint.Format(format) =>
-                format match
-                    case "email"            =>
-                        facets = facets :+ elem("pattern", attr("value", "[^@]+@[^@]+\\.[^@]+"))
-                    case "uri"              =>
-                        baseType = "xs:anyURI"
-                    case "iso8601-date"     =>
-                        baseType = "xs:date"
-                    case "iso8601-time"     =>
-                        baseType = "xs:time"
-                    case "iso8601-datetime" =>
-                        baseType = "xs:dateTime"
-                    case other              =>
-                        newContext = newContext.addLoss(
-                            s"Custom format '$other' not supported in XSD",
-                            Some("Consider using xs:pattern restriction")
-                        )
+        // Handle format
+        constraints.format.foreach { format =>
+            format match
+                case "email"            =>
+                    facets = facets :+ elem("pattern", attr("value", "[^@]+@[^@]+\\.[^@]+"))
+                case "uri"              =>
+                    baseType = "xs:anyURI"
+                case "iso8601-date"     =>
+                    baseType = "xs:date"
+                case "iso8601-time"     =>
+                    baseType = "xs:time"
+                case "iso8601-datetime" =>
+                    baseType = "xs:dateTime"
+                case other              =>
+                    newContext = newContext.addLoss(
+                        s"Custom format '$other' not supported in XSD",
+                        Some("Consider using xs:pattern restriction")
+                    )
+        }
 
         default.foreach { d =>
             facets = facets :+ annotation(s"Default: $d")
@@ -212,32 +220,33 @@ object XsdExporter:
         val restriction = elem("restriction", attr("base", baseType), facets)
         (Seq(restriction), newContext)
 
-    private def translateNumericValue(constraints: Seq[NumericConstraint.Constraint], default: Option[BigDecimal], context: TranslationContext): (NodeSeq, TranslationContext) =
-        var baseType   = "xs:decimal"
+    private def translateNumericValue(constraints: NumericConstraint.Constraints, default: Option[BigDecimal], context: TranslationContext): (NodeSeq, TranslationContext) =
+        var baseType   = if constraints.integer then "xs:integer" else "xs:decimal"
         var facets     = List.empty[Node]
         var newContext = context
 
-        constraints.foreach:
-            case NumericConstraint.Integer =>
-                baseType = "xs:integer"
-
-            case NumericConstraint.Value(bound) =>
+        // Handle value constraints
+        constraints.value.foreach { valueRange =>
+            valueRange.min.foreach { bound =>
                 if bound.isExact then
                     facets = facets :+ elem("minInclusive", attr("value", bound.value.toString))
                     facets = facets :+ elem("maxInclusive", attr("value", bound.value.toString))
-                else
-                    if bound.isMinInclusive then facets = facets :+ elem("minInclusive", attr("value", bound.value.toString))
-                    if bound.isMaxInclusive then facets = facets :+ elem("maxInclusive", attr("value", bound.value.toString))
-                    if bound.isMinExclusive then
-                        newContext = newContext.addApproximation(
-                            s"Exclusive minimum not directly supported in XSD",
-                            Some("Consider using minInclusive with value + epsilon")
-                        )
-                    if bound.isMaxExclusive then
-                        newContext = newContext.addApproximation(
-                            s"Exclusive maximum not directly supported in XSD",
-                            Some("Consider using maxInclusive with value - epsilon")
-                        )
+                else if bound.isMinInclusive then facets = facets :+ elem("minInclusive", attr("value", bound.value.toString))
+                else if bound.isMinExclusive then
+                    newContext = newContext.addApproximation(
+                        s"Exclusive minimum not directly supported in XSD",
+                        Some("Consider using minInclusive with value + epsilon")
+                    )
+            }
+            valueRange.max.foreach { bound =>
+                if bound.isMaxInclusive then facets = facets :+ elem("maxInclusive", attr("value", bound.value.toString))
+                else if bound.isMaxExclusive then
+                    newContext = newContext.addApproximation(
+                        s"Exclusive maximum not directly supported in XSD",
+                        Some("Consider using maxInclusive with value - epsilon")
+                    )
+            }
+        }
 
         default.foreach { d =>
             facets = facets :+ annotation(s"Default: $d")
@@ -265,29 +274,34 @@ object XsdExporter:
         val simpleType   = elem("simpleType", Seq(restriction))
         (Seq(simpleType), context)
 
-    private def translateListOfValues(elementSchema: Schema, constraints: Seq[ListConstraint.Constraint], context: TranslationContext): (NodeSeq, TranslationContext) =
+    private def translateListOfValues(elementSchema: Schema, constraints: ListConstraint.Constraints, context: TranslationContext): (NodeSeq, TranslationContext) =
         val (elementType, elemContext) = translateSchema(elementSchema, context.atPath("items"))
 
         var minOccurs  = "0"
         var maxOccurs  = "unbounded"
         var newContext = elemContext
 
-        constraints.foreach:
-            case ListConstraint.Size(bound) =>
+        // Handle size constraints
+        constraints.size.foreach { sizeRange =>
+            sizeRange.min.foreach { bound =>
                 if bound.isExact then
                     minOccurs = bound.value.toString
                     maxOccurs = bound.value.toString
-                else
-                    if bound.isMinInclusive then minOccurs = bound.value.toString
-                    if bound.isMaxInclusive then maxOccurs = bound.value.toString
+                else if bound.isMinInclusive then minOccurs = bound.value.toString
+            }
+            sizeRange.max.foreach { bound =>
+                if bound.isMaxInclusive then maxOccurs = bound.value.toString
+            }
+        }
 
-            case ListConstraint.Unique =>
+        // Handle uniqueness constraints
+        constraints.unique.foreach:
+            case ListConstraint.Uniqueness.Simple      =>
                 newContext = newContext.addApproximation(
                     "UniqueItems constraint not directly supported in XSD",
                     Some("Consider using xs:unique constraint")
                 )
-
-            case ListConstraint.UniqueByFields(_) =>
+            case ListConstraint.Uniqueness.ByFields(_) =>
                 newContext = newContext.addLoss(
                     "UniqueByFields constraint not supported in XSD",
                     Some("Consider using xs:unique or xs:key")

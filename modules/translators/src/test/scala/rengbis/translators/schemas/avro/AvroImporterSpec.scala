@@ -17,12 +17,12 @@ object AvroImporterSpec extends ZIOSpecDefault:
             test("imports int"):
                 val avro   = """"int""""
                 val result = AvroImporter.fromAvro(avro)
-                assertTrue(result.map(_._1) == Right(NumericValue(Seq(NumericConstraint.Integer))))
+                assertTrue(result.map(_._1) == Right(NumericValue(NumericConstraint.Constraints(integer = true))))
             ,
             test("imports long"):
                 val avro   = """"long""""
                 val result = AvroImporter.fromAvro(avro)
-                assertTrue(result.map(_._1) == Right(NumericValue(Seq(NumericConstraint.Integer))))
+                assertTrue(result.map(_._1) == Right(NumericValue(NumericConstraint.Constraints(integer = true))))
             ,
             test("imports float"):
                 val avro   = """"float""""
@@ -58,7 +58,7 @@ object AvroImporterSpec extends ZIOSpecDefault:
                 val expected = ObjectValue(
                     Map(
                         MandatoryLabel("name") -> TextValue(),
-                        MandatoryLabel("age")  -> NumericValue(Seq(NumericConstraint.Integer))
+                        MandatoryLabel("age")  -> NumericValue(NumericConstraint.Constraints(integer = true))
                     )
                 )
                 assertTrue(result.map(_._1) == Right(expected))
@@ -106,7 +106,7 @@ object AvroImporterSpec extends ZIOSpecDefault:
                     "values": "int"
                 }"""
                 val result   = AvroImporter.fromAvro(avro)
-                val expected = MapValue(NumericValue(Seq(NumericConstraint.Integer)))
+                val expected = MapValue(NumericValue(NumericConstraint.Constraints(integer = true)))
                 assertTrue(result.map(_._1) == Right(expected))
             ,
             test("imports fixed with friction"):
@@ -170,7 +170,7 @@ object AvroImporterSpec extends ZIOSpecDefault:
                 val result   = AvroImporter.fromAvro(avro)
                 val expected = AlternativeValues(
                     TextValue(),
-                    NumericValue(Seq(NumericConstraint.Integer))
+                    NumericValue(NumericConstraint.Constraints(integer = true))
                 )
                 assertTrue(result.map(_._1) == Right(expected))
             ,
@@ -233,8 +233,8 @@ object AvroImporterSpec extends ZIOSpecDefault:
                 }"""
                 val result = AvroImporter.fromAvro(avro)
                 assertTrue(result.isRight && (result.map(_._1) match {
-                    case Right(ListOfValues(ObjectValue(_))) => true
-                    case _                                   => false
+                    case Right(ListOfValues(ObjectValue(_), _)) => true
+                    case _                                      => false
                 }))
         ),
         suite("Error handling")(
@@ -258,7 +258,7 @@ object AvroImporterSpec extends ZIOSpecDefault:
                 val original      = ObjectValue(
                     Map(
                         MandatoryLabel("name") -> TextValue(),
-                        MandatoryLabel("age")  -> NumericValue(Seq(NumericConstraint.Integer))
+                        MandatoryLabel("age")  -> NumericValue(NumericConstraint.Constraints(integer = true))
                     )
                 )
                 val (avroJson, _) = AvroExporter.toAvro(original, "Person")

@@ -30,7 +30,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(NumericValue(Seq(NumericConstraint.Integer), None))
+                    result.map(_._1) == Right(NumericValue(NumericConstraint.Constraints(integer = true)))
                 )
             },
             test("imports boolean type") {
@@ -64,7 +64,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(TextValue(Seq(TextConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 5))), None))
+                    result.map(_._1) == Right(TextValue(TextConstraint.Constraints(size = Some(TextConstraint.SizeRange.minInclusive(5)))))
                 )
             },
             test("imports maxLength") {
@@ -72,7 +72,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(TextValue(Seq(TextConstraint.Size(BoundConstraint(BoundOp.MaxInclusive, 100))), None))
+                    result.map(_._1) == Right(TextValue(TextConstraint.Constraints(size = Some(TextConstraint.SizeRange.maxInclusive(100)))))
                 )
             },
             test("imports pattern") {
@@ -80,7 +80,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(TextValue(Seq(TextConstraint.Regex("^[a-z]+$")), None))
+                    result.map(_._1) == Right(TextValue(TextConstraint.Constraints(regex = Some("^[a-z]+$"))))
                 )
             },
             test("imports email format") {
@@ -88,7 +88,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(TextValue(Seq(TextConstraint.Format("email")), None))
+                    result.map(_._1) == Right(TextValue(TextConstraint.Constraints(format = Some("email"))))
                 )
             },
             test("imports string with default") {
@@ -96,7 +96,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(TextValue(Seq.empty, Some("hello")))
+                    result.map(_._1) == Right(TextValue(default = Some("hello")))
                 )
             }
         ),
@@ -106,7 +106,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, BigDecimal(0)))), None))
+                    result.map(_._1) == Right(NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.minInclusive(BigDecimal(0))))))
                 )
             },
             test("imports maximum") {
@@ -114,7 +114,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(100)))), None))
+                    result.map(_._1) == Right(NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.maxInclusive(BigDecimal(100))))))
                 )
             },
             test("imports exclusiveMinimum") {
@@ -122,7 +122,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MinExclusive, BigDecimal(0)))), None))
+                    result.map(_._1) == Right(NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.minExclusive(BigDecimal(0))))))
                 )
             },
             test("imports exclusiveMaximum") {
@@ -130,19 +130,22 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MaxExclusive, BigDecimal(100)))), None))
+                    result.map(_._1) == Right(NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.maxExclusive(BigDecimal(100))))))
                 )
             },
             test("imports integer with range") {
                 val jsonSchema = """{"type": "integer", "minimum": 1, "maximum": 10}"""
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 val expected   = NumericValue(
-                    Seq(
-                        NumericConstraint.Integer,
-                        NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, BigDecimal(1))),
-                        NumericConstraint.Value(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(10)))
-                    ),
-                    None
+                    NumericConstraint.Constraints(
+                        value = Some(
+                            NumericConstraint.ValueRange(
+                                Some(BoundConstraint(BoundOp.MinInclusive, BigDecimal(1))),
+                                Some(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(10)))
+                            )
+                        ),
+                        integer = true
+                    )
                 )
                 assertTrue(
                     result.isRight,
@@ -199,7 +202,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
             test("imports array with minItems") {
                 val jsonSchema = """{"type": "array", "items": {"type": "string"}, "minItems": 1}"""
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
-                val expected   = ListOfValues(TextValue(), ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1)))
+                val expected   = ListOfValues(TextValue(), ListConstraint.Constraints(size = Some(ListConstraint.SizeRange.minInclusive(1))))
                 assertTrue(
                     result.isRight,
                     result.map(_._1) == Right(expected)
@@ -208,7 +211,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
             test("imports array with uniqueItems") {
                 val jsonSchema = """{"type": "array", "items": {"type": "string"}, "uniqueItems": true}"""
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
-                val expected   = ListOfValues(TextValue(), ListConstraint.Unique)
+                val expected   = ListOfValues(TextValue(), ListConstraint.Constraints(unique = Seq(ListConstraint.Uniqueness.Simple)))
                 assertTrue(
                     result.isRight,
                     result.map(_._1) == Right(expected)
@@ -287,7 +290,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
             test("imports const number") {
                 val jsonSchema = """{"const": 42}"""
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
-                val expected   = NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.Exact, BigDecimal(42)))), None)
+                val expected   = NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.exact(BigDecimal(42)))))
                 assertTrue(
                     result.isRight,
                     result.map(_._1) == Right(expected)
@@ -385,7 +388,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
         ),
         suite("Round-trip compatibility")(
             test("string with constraints round-trips") {
-                val original      = TextValue(Seq(TextConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 5))), None)
+                val original      = TextValue(TextConstraint.Constraints(size = Some(TextConstraint.SizeRange.minInclusive(5))))
                 val (exported, _) = JsonSchemaExporter.toJsonSchema(original)
                 val reimported    = JsonSchemaImporter.fromJsonSchema(exported.toJson)
                 assertTrue(
@@ -395,11 +398,10 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
             },
             test("number with constraints round-trips") {
                 val original      = NumericValue(
-                    Seq(
-                        NumericConstraint.Integer,
-                        NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, BigDecimal(0)))
-                    ),
-                    None
+                    NumericConstraint.Constraints(
+                        value = Some(NumericConstraint.ValueRange.minInclusive(BigDecimal(0))),
+                        integer = true
+                    )
                 )
                 val (exported, _) = JsonSchemaExporter.toJsonSchema(original)
                 val reimported    = JsonSchemaImporter.fromJsonSchema(exported.toJson)

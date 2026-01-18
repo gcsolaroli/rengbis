@@ -58,47 +58,42 @@ object AvroExporter:
 
             case TextValue(constraints, defaultValue) =>
                 val baseContext =
-                    if constraints.nonEmpty then
+                    if !constraints.isEmpty then
                         context.addFriction(
                             FrictionType.Loss,
-                            s"Text constraints ${ constraints.mkString(", ") } cannot be represented in Avro"
+                            s"Text constraints cannot be represented in Avro"
                         )
                     else context
                 (Json.Str("string"), baseContext)
 
             case NumericValue(constraints, defaultValue) =>
-                val isInteger = constraints.exists:
-                    case NumericConstraint.Integer => true
-                    case _                         => false
+                val isInteger = constraints.integer
 
-                val hasLargeNumbers = constraints.exists:
-                    case NumericConstraint.Value(bound) =>
-                        bound.value.abs > Int.MaxValue && bound.value.abs <= Long.MaxValue
-                    case _                              => false
+                val hasLargeNumbers = constraints.value.exists { valueRange =>
+                    valueRange.min.exists(b => b.value.abs > Int.MaxValue && b.value.abs <= Long.MaxValue) ||
+                    valueRange.max.exists(b => b.value.abs > Int.MaxValue && b.value.abs <= Long.MaxValue)
+                }
 
                 val avroType =
                     if isInteger then if hasLargeNumbers then "long" else "int"
                     else "double"
 
-                val contextWithFriction = if constraints.exists {
-                        case NumericConstraint.Integer  => false
-                        case NumericConstraint.Value(_) => true
-                    }
-                then
-                    context.addFriction(
-                        FrictionType.Loss,
-                        "Numeric value constraints cannot be represented in Avro"
-                    )
-                else context
+                val contextWithFriction =
+                    if constraints.value.isDefined then
+                        context.addFriction(
+                            FrictionType.Loss,
+                            "Numeric value constraints cannot be represented in Avro"
+                        )
+                    else context
 
                 (Json.Str(avroType), contextWithFriction)
 
-            case BinaryValue(constraints*) =>
+            case BinaryValue(constraints) =>
                 val contextWithFriction =
-                    if constraints.nonEmpty then
+                    if !constraints.isEmpty then
                         context.addFriction(
                             FrictionType.Loss,
-                            s"Binary constraints ${ constraints.mkString(", ") } cannot be represented in Avro"
+                            s"Binary constraints cannot be represented in Avro"
                         )
                     else context
                 (Json.Str("bytes"), contextWithFriction)
@@ -146,13 +141,13 @@ object AvroExporter:
                         )
                         (Json.Str("string"), contextWithFriction)
 
-            case ListOfValues(itemSchema, constraints*) =>
+            case ListOfValues(itemSchema, constraints) =>
                 val (itemJson, itemContext) = translateSchema(itemSchema, context.withPath(s"${ context.path }[]"))
                 val finalContext            =
-                    if constraints.nonEmpty then
+                    if !constraints.isEmpty then
                         itemContext.addFriction(
                             FrictionType.Loss,
-                            s"List constraints ${ constraints.mkString(", ") } cannot be represented in Avro"
+                            s"List constraints cannot be represented in Avro"
                         )
                     else itemContext
                 (Json.Obj("type" -> Json.Str("array"), "items" -> itemJson), finalContext)

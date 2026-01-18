@@ -48,10 +48,10 @@ object AvroImporter:
                 Right((BooleanValue(), context))
 
             case Json.Str("int") =>
-                Right((NumericValue(Seq(NumericConstraint.Integer)), context))
+                Right((NumericValue(NumericConstraint.Constraints(integer = true)), context))
 
             case Json.Str("long") =>
-                Right((NumericValue(Seq(NumericConstraint.Integer)), context))
+                Right((NumericValue(NumericConstraint.Constraints(integer = true)), context))
 
             case Json.Str("float") =>
                 Right((NumericValue(), context))
@@ -120,9 +120,11 @@ object AvroImporter:
                 case _           => None
             .getOrElse("Record")
 
-        val doc = fields.get("doc").flatMap:
-            case Json.Str(d) => Some(d)
-            case _           => None
+        val doc = fields
+            .get("doc")
+            .flatMap:
+                case Json.Str(d) => Some(d)
+                case _           => None
 
         fields.get("fields") match
             case Some(Json.Arr(fieldDefs)) =>
@@ -162,7 +164,7 @@ object AvroImporter:
                     .flatMap:
                         case Json.Str(n) => Some(n)
                         case _           => None
-                    match
+                match
                     case None            => Left("Missing field name")
                     case Some(fieldName) =>
                         val fieldPath = if context.path.isEmpty then fieldName else s"${ context.path }.$fieldName"
@@ -228,9 +230,11 @@ object AvroImporter:
                 Left("Missing 'values' in map type")
 
     private def translateFixed(fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
-        val size = fields.get("size").flatMap:
-            case Json.Num(n) => Some(n.intValue())
-            case _           => None
+        val size = fields
+            .get("size")
+            .flatMap:
+                case Json.Num(n) => Some(n.intValue())
+                case _           => None
 
         val updatedContext = size match
             case Some(s) =>

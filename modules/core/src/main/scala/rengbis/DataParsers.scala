@@ -40,7 +40,7 @@ object DataParsers:
     def csv(csvString: String): Validator = csv(CSVReader.open(new StringReader(csvString)))
     def csv(reader: CSVReader): Validator = (schema: Schema) =>
         schema match
-            case Schema.ListOfValues(Schema.ObjectValue(objSchema), _*) =>
+            case Schema.ListOfValues(Schema.ObjectValue(objSchema), _) =>
                 val csvRows   = reader.allWithHeaders()
                 val keyNames  = objSchema.keys.map(_.label).toSet
                 val rowValues = csvRows.map { row =>
@@ -49,7 +49,7 @@ object DataParsers:
                 }
                 Right(Value.ListOfValues(Chunk.fromIterable(rowValues))).flatMap(validateValue(schema))
 
-            case Schema.ListOfValues(Schema.TupleValue(tupleSchemas*), _*) =>
+            case Schema.ListOfValues(Schema.TupleValue(tupleSchemas*), _) =>
                 val csvRows   = reader.all()
                 val rowValues = csvRows.map { row =>
                     val tupleValues = row.take(tupleSchemas.size).map(Value.TextValue(_))

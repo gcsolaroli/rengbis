@@ -29,7 +29,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports integer type") {
-                val schema        = NumericValue(Seq(NumericConstraint.Integer))
+                val schema        = NumericValue(NumericConstraint.Constraints(integer = true))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("xs:integer"),
@@ -67,7 +67,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
         ),
         suite("Text constraints")(
             test("exports minLength") {
-                val schema        = TextValue(Seq(TextConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 3))))
+                val schema        = TextValue(TextConstraint.Constraints(size = Some(TextConstraint.SizeRange.minInclusive(3))))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("<xs:minLength value=\"3\""),
@@ -75,7 +75,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports maxLength") {
-                val schema        = TextValue(Seq(TextConstraint.Size(BoundConstraint(BoundOp.MaxInclusive, 100))))
+                val schema        = TextValue(TextConstraint.Constraints(size = Some(TextConstraint.SizeRange.maxInclusive(100))))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("<xs:maxLength value=\"100\""),
@@ -83,7 +83,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports exact length") {
-                val schema        = TextValue(Seq(TextConstraint.Size(BoundConstraint(BoundOp.Exact, 10))))
+                val schema        = TextValue(TextConstraint.Constraints(size = Some(TextConstraint.SizeRange.exact(10))))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("<xs:length value=\"10\""),
@@ -91,7 +91,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports regex pattern") {
-                val schema        = TextValue(Seq(TextConstraint.Regex("[a-z]+")))
+                val schema        = TextValue(TextConstraint.Constraints(regex = Some("[a-z]+")))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("<xs:pattern value=\"[a-z]+\""),
@@ -99,7 +99,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports email format as pattern") {
-                val schema        = TextValue(Seq(TextConstraint.Format("email")))
+                val schema        = TextValue(TextConstraint.Constraints(format = Some("email")))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("<xs:pattern value=\"[^@]+@[^@]+\\.[^@]+\""),
@@ -115,7 +115,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("reports friction for custom format") {
-                val schema        = TextValue(Seq(TextConstraint.Format("custom")))
+                val schema        = TextValue(TextConstraint.Constraints(format = Some("custom")))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     report.nonEmpty,
@@ -125,7 +125,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
         ),
         suite("Time/Date formats")(
             test("exports date format") {
-                val schema        = TextValue(Seq(TextConstraint.Format("iso8601-date")))
+                val schema        = TextValue(TextConstraint.Constraints(format = Some("iso8601-date")))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("xs:date"),
@@ -134,7 +134,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports time format") {
-                val schema        = TextValue(Seq(TextConstraint.Format("iso8601-time")))
+                val schema        = TextValue(TextConstraint.Constraints(format = Some("iso8601-time")))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("xs:time"),
@@ -143,7 +143,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports date-time format") {
-                val schema        = TextValue(Seq(TextConstraint.Format("iso8601-datetime")))
+                val schema        = TextValue(TextConstraint.Constraints(format = Some("iso8601-datetime")))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("xs:dateTime"),
@@ -152,7 +152,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports URI format") {
-                val schema        = TextValue(Seq(TextConstraint.Format("uri")))
+                val schema        = TextValue(TextConstraint.Constraints(format = Some("uri")))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("xs:anyURI"),
@@ -163,7 +163,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
         ),
         suite("Numeric constraints")(
             test("exports minimum value") {
-                val schema        = NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, BigDecimal(0)))))
+                val schema        = NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.minInclusive(BigDecimal(0)))))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("<xs:minInclusive value=\"0\""),
@@ -171,7 +171,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports maximum value") {
-                val schema        = NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(100)))))
+                val schema        = NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.maxInclusive(BigDecimal(100)))))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("<xs:maxInclusive value=\"100\""),
@@ -179,7 +179,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("exports exact value") {
-                val schema        = NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.Exact, BigDecimal(42)))))
+                val schema        = NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.exact(BigDecimal(42)))))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     xsd.contains("<xs:minInclusive value=\"42\""),
@@ -189,10 +189,14 @@ object XsdExporterSpec extends ZIOSpecDefault:
             },
             test("exports integer with range") {
                 val schema        = NumericValue(
-                    Seq(
-                        NumericConstraint.Integer,
-                        NumericConstraint.Value(BoundConstraint(BoundOp.MinInclusive, BigDecimal(1))),
-                        NumericConstraint.Value(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(10)))
+                    NumericConstraint.Constraints(
+                        value = Some(
+                            NumericConstraint.ValueRange(
+                                Some(BoundConstraint(BoundOp.MinInclusive, BigDecimal(1))),
+                                Some(BoundConstraint(BoundOp.MaxInclusive, BigDecimal(10)))
+                            )
+                        ),
+                        integer = true
                     )
                 )
                 val (xsd, report) = XsdExporter.toXsd(schema)
@@ -212,7 +216,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 )
             },
             test("reports friction for exclusive bounds") {
-                val schema        = NumericValue(Seq(NumericConstraint.Value(BoundConstraint(BoundOp.MinExclusive, BigDecimal(0)))))
+                val schema        = NumericValue(NumericConstraint.Constraints(value = Some(NumericConstraint.ValueRange.minExclusive(BigDecimal(0)))))
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
                     report.nonEmpty,
@@ -254,7 +258,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
             test("exports array with minItems") {
                 val schema        = ListOfValues(
                     TextValue(),
-                    ListConstraint.Size(BoundConstraint(BoundOp.MinInclusive, 1))
+                    ListConstraint.Constraints(size = Some(ListConstraint.SizeRange.minInclusive(1)))
                 )
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
@@ -266,7 +270,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
             test("exports array with maxItems") {
                 val schema        = ListOfValues(
                     TextValue(),
-                    ListConstraint.Size(BoundConstraint(BoundOp.MaxInclusive, 10))
+                    ListConstraint.Constraints(size = Some(ListConstraint.SizeRange.maxInclusive(10)))
                 )
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
@@ -278,7 +282,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
             test("reports friction for unique") {
                 val schema        = ListOfValues(
                     TextValue(),
-                    ListConstraint.Unique
+                    ListConstraint.Constraints(unique = Seq(ListConstraint.Uniqueness.Simple))
                 )
                 val (xsd, report) = XsdExporter.toXsd(schema)
                 assertTrue(
@@ -305,7 +309,7 @@ object XsdExporterSpec extends ZIOSpecDefault:
                 val schema        = ObjectValue(
                     Map(
                         MandatoryLabel("name") -> TextValue(),
-                        MandatoryLabel("age")  -> NumericValue(Seq(NumericConstraint.Integer))
+                        MandatoryLabel("age")  -> NumericValue(NumericConstraint.Constraints(integer = true))
                     )
                 )
                 val (xsd, report) = XsdExporter.toXsd(schema)
