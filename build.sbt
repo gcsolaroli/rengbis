@@ -75,7 +75,7 @@ lazy val translators = project
 
 lazy val cli = project
     .in(file("modules/cli"))
-    .dependsOn(core)
+    .dependsOn(core, translators)
     .enablePlugins(NativeImagePlugin, BuildInfoPlugin)
     .settings(
         name    := "rengbis-cli",
