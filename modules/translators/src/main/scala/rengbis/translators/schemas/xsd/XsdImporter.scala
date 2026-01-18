@@ -127,8 +127,13 @@ object XsdImporter:
         }
 
     private def translateTypeReference(typeName: String, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
-        // Check if it's a built-in XSD type
-        val baseType = if typeName.startsWith("xs:") then typeName.substring(3) else typeName
+        // Check if it's a built-in XSD type - strip the namespace prefix (xs: or xsd: or the detected prefix)
+        val xsPrefix = context.xsPrefix
+        val baseType =
+            if typeName.startsWith(s"$xsPrefix:") then typeName.substring(xsPrefix.length + 1)
+            else if typeName.startsWith("xs:") then typeName.substring(3)
+            else if typeName.startsWith("xsd:") then typeName.substring(4)
+            else typeName
 
         baseType match
             // String types

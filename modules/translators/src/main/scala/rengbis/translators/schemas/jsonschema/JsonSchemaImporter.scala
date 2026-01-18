@@ -22,7 +22,7 @@ object JsonSchemaImporter:
         jsonSchemaText.fromJson[Json] match
             case Left(error)    => Left(s"Failed to parse JSON: $error")
             case Right(jsonAst) =>
-                val context = TranslationContext()
+                val context = TranslationContext(rootJson = jsonAst)
                 translateSchema(jsonAst, context) match
                     case Left(error)          => Left(error)
                     case Right((schema, ctx)) => Right((schema, ctx.report))
@@ -30,7 +30,9 @@ object JsonSchemaImporter:
     private case class TranslationContext(
         path: String = "$",
         report: FrictionReport = FrictionReport(),
-        definitions: Map[String, Json] = Map.empty
+        definitions: Map[String, Json] = Map.empty,
+        rootJson: Json = Json.Obj(),
+        resolvedRefs: Set[String] = Set.empty // Track refs being resolved to detect cycles
     ):
         def atPath(newPath: String): TranslationContext =
             copy(path = if newPath.startsWith("$") then newPath else s"$path/$newPath")
@@ -46,6 +48,44 @@ object JsonSchemaImporter:
 
         def withDefinitions(defs: Map[String, Json]): TranslationContext =
             copy(definitions = definitions ++ defs)
+
+        def withResolvedRef(ref: String): TranslationContext =
+            copy(resolvedRefs = resolvedRefs + ref)
+
+        def isResolvingRef(ref: String): Boolean =
+            resolvedRefs.contains(ref)
+
+    /** Resolves a JSON Pointer (RFC 6901) path within a JSON document.
+      * @param json
+      *   The root JSON document
+      * @param pointer
+      *   The JSON pointer path (e.g., "/properties/name" or "properties/name")
+      * @return
+      *   The JSON at the pointer location, or None if not found
+      */
+    private def resolveJsonPointer(json: Json, pointer: String): Option[Json] =
+        val path = if pointer.startsWith("/") then pointer.substring(1) else pointer
+        if path.isEmpty then Some(json)
+        else
+            val segments = path
+                .split("/")
+                .toList
+                .map(s =>
+                    // JSON Pointer escape sequences: ~1 = /, ~0 = ~
+                    s.replace("~1", "/").replace("~0", "~")
+                )
+            segments.foldLeft[Option[Json]](Some(json)) { (current, segment) =>
+                current.flatMap:
+                    case Json.Obj(fields) => fields.toMap.get(segment)
+                    case Json.Arr(items)  => segment.toIntOption.flatMap(i => items.lift(i))
+                    case _                => None
+            }
+
+    /** Converts a JSON pointer path to a valid ReNGBis reference name. E.g., "/properties/ecmaFeatures" -> "properties_ecmaFeatures"
+      */
+    private def pointerToRefName(pointer: String): String =
+        val path = if pointer.startsWith("/") then pointer.substring(1) else pointer
+        path.replace("/", "_").replace("~1", "_").replace("~0", "_")
 
     private def translateSchema(json: Json, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         json match
@@ -75,27 +115,68 @@ object JsonSchemaImporter:
 
                 typeResult.map { case (schema, ctx) =>
                     // Wrap with metadata if present
-                    val withDoc = fields.get("description") match
-                        case Some(Json.Str(desc)) => Documented(Some(desc), schema)
-                        case _                    => schema
+                    // Note: Documented is only valid for ObjectValue in ReNGBis syntax
+                    val (withDoc, docCtx) = fields.get("description") match
+                        case Some(Json.Str(desc)) =>
+                            schema match
+                                case _: ObjectValue => (Documented(Some(desc), schema), ctx)
+                                case _              =>
+                                    // Documentation on non-object types is lost
+                                    (
+                                        schema,
+                                        ctx.addLoss(
+                                            s"description on non-object type lost: '${ desc.take(50) }...'",
+                                            Some("Documentation is only supported on object types in ReNGBis")
+                                        )
+                                    )
+                        case _                    => (schema, ctx)
 
                     val withDeprecated = fields.get("deprecated") match
                         case Some(Json.Bool(true)) => Deprecated(withDoc)
                         case _                     => withDoc
 
-                    (withDeprecated, ctx)
+                    (withDeprecated, docCtx)
                 }
 
     private def translateRef(ref: String, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         if ref.startsWith("#/$defs/") || ref.startsWith("#/definitions/") then
-            // Internal reference
+            // Internal reference to $defs/definitions - use NamedValueReference
             val name = ref.split("/").last
             Right((NamedValueReference(name), context))
+        else if ref == "#" then
+            // Self-reference (recursive schema)
+            if context.isResolvingRef(ref) then
+                // Already resolving this ref - it's a recursive reference
+                // Use a placeholder name for the root schema (must start with letter)
+                Right((NamedValueReference("root"), context))
+            else
+                // Resolve by translating the root schema
+                val ctxWithRef = context.withResolvedRef(ref)
+                translateSchema(context.rootJson, ctxWithRef)
+        else if ref.startsWith("#/") then
+            // Internal reference using JSON pointer (e.g., #/properties/ecmaFeatures)
+            val pointer = ref.substring(1) // Remove the leading #
+            if context.isResolvingRef(ref) then
+                // Cycle detected - use a named reference
+                val refName = pointerToRefName(pointer)
+                Right((NamedValueReference(refName), context))
+            else
+                resolveJsonPointer(context.rootJson, pointer) match
+                    case Some(referencedJson) =>
+                        // Inline the referenced schema
+                        val ctxWithRef = context.withResolvedRef(ref)
+                        translateSchema(referencedJson, ctxWithRef)
+                    case None                 =>
+                        val currentCtx = context.addLoss(
+                            s"Internal reference '$ref' could not be resolved",
+                            Some("The referenced path does not exist in the schema")
+                        )
+                        Right((AnyValue(), currentCtx))
         else if ref.startsWith("#") then
-            // Other internal reference (anchor, etc.)
+            // Anchor reference (e.g., #myAnchor) - not supported
             val currentCtx = context.addApproximation(
-                s"Internal reference '$ref' using anchors not fully supported",
-                Some("Only #/$$defs/ references are fully supported")
+                s"Anchor reference '$ref' not supported",
+                Some("Use JSON pointer references like #/$$defs/name instead")
             )
             Right((AnyValue(), currentCtx))
         else if ref.contains("://") then
@@ -154,6 +235,7 @@ object JsonSchemaImporter:
             case _                  => None
 
         if typeSchemas.isEmpty then Left("No valid types in type array")
+        else if typeSchemas.size == 1 then Right((typeSchemas.head, currentCtx))
         else Right((AlternativeValues(typeSchemas*), currentCtx))
 
     private def translateUntyped(fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
@@ -179,11 +261,27 @@ object JsonSchemaImporter:
             })
             .orElse(fields.get("enum").map {
                 case Json.Arr(values) =>
-                    val stringValues = values.toList.collect { case Json.Str(s) => s }
-                    if stringValues.size == values.size then Right((EnumValues(stringValues*), context))
-                    else
-                        val ctx = context.addLoss("enum with non-string values not fully supported", Some("Only string enums are supported"))
-                        Right((EnumValues(stringValues*), ctx))
+                    // Convert all enum values to strings
+                    val allStringValues = values.toList.map {
+                        case Json.Str(s)  => s
+                        case Json.Num(n)  =>
+                            val bd = BigDecimal(n)
+                            if bd.isWhole then bd.toBigInt.toString else bd.toString
+                        case Json.Bool(b) => b.toString
+                        case Json.Null    => "null"
+                        case other        => other.toString // fallback
+                    }
+                    val hasNonString    = values.exists {
+                        case Json.Str(_) => false
+                        case _           => true
+                    }
+                    if hasNonString then
+                        val ctx = context.addApproximation(
+                            "non-string enum values converted to strings",
+                            Some("Numbers and booleans in enums are represented as string literals")
+                        )
+                        Right((EnumValues(allStringValues*), ctx))
+                    else Right((EnumValues(allStringValues*), context))
                 case _                => Right((AnyValue(), context))
             })
             .getOrElse(Right((AnyValue(), context)))
@@ -387,7 +485,7 @@ object JsonSchemaImporter:
             case _                                                                    =>
                 // Regular object with properties
                 fields.get("properties") match
-                    case Some(Json.Obj(props)) =>
+                    case Some(Json.Obj(props)) if props.nonEmpty =>
                         val required = fields.get("required") match
                             case Some(Json.Arr(reqs)) => reqs.toList.collect { case Json.Str(s) => s }.toSet
                             case _                    => Set.empty[String]
@@ -433,9 +531,16 @@ object JsonSchemaImporter:
                             }
 
                     case None =>
-                        // Object without properties - empty object or map
+                        // Object without properties - treat as open map
+                        // Note: additionalProperties: false with no properties means "no valid object"
+                        // but we approximate it as an open map since empty ObjectValue can't be printed
                         fields.get("additionalProperties") match
-                            case Some(Json.Bool(false)) => Right((ObjectValue(Map.empty), currentCtx))
+                            case Some(Json.Bool(false)) =>
+                                val ctx = currentCtx.addApproximation(
+                                    "closed empty object approximated as open map",
+                                    Some("JSON Schema with no properties and additionalProperties:false")
+                                )
+                                Right((MapValue(AnyValue()), ctx))
                             case _                      => Right((MapValue(AnyValue()), currentCtx))
 
                     case _ => Left("Invalid properties definition")
@@ -450,7 +555,13 @@ object JsonSchemaImporter:
                                 case Left(error)                 => Left(error)
                                 case Right((translated, newCtx)) => Right((translatedSchemas :+ translated, newCtx))
                         case (left @ Left(_), _)                              => left
-                    .map { case (translatedSchemas, ctx) => (AlternativeValues(translatedSchemas*), ctx) }
+                    .map { case (translatedSchemas, ctx) =>
+                        // Unwrap single-element alternatives - they're semantically equivalent to the inner schema
+                        val schema =
+                            if translatedSchemas.size == 1 then translatedSchemas.head
+                            else AlternativeValues(translatedSchemas*)
+                        (schema, ctx)
+                    }
             case _                 => Left("anyOf must be an array")
 
     private def translateOneOf(json: Json, context: TranslationContext): Either[String, (Schema, TranslationContext)] =

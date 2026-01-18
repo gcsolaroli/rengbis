@@ -348,12 +348,24 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
             }
         ),
         suite("Metadata")(
-            test("imports description") {
-                val jsonSchema = """{"type": "string", "description": "A text field"}"""
-                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+            test("imports description on object type") {
+                val jsonSchema  = """{"type": "object", "description": "An object", "properties": {"x": {"type": "string"}}}"""
+                val result      = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                val (schema, _) = result.getOrElse((AnyValue(), FrictionReport()))
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(Documented(Some("A text field"), TextValue()))
+                    schema.isInstanceOf[Documented],
+                    schema.asInstanceOf[Documented].doc == Some("An object")
+                )
+            },
+            test("description on non-object type is lost as friction") {
+                val jsonSchema               = """{"type": "string", "description": "A text field"}"""
+                val result                   = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                val (schema, frictionReport) = result.getOrElse((AnyValue(), FrictionReport()))
+                assertTrue(
+                    result.isRight,
+                    schema == TextValue(),
+                    frictionReport.entries.exists(e => e.frictionType == FrictionType.Loss && e.message.contains("description on non-object"))
                 )
             },
             test("imports deprecated") {
@@ -364,12 +376,14 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                     result.map(_._1) == Right(Deprecated(TextValue()))
                 )
             },
-            test("imports both description and deprecated") {
-                val jsonSchema = """{"type": "string", "description": "Old field", "deprecated": true}"""
-                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+            test("imports both deprecated and description (description lost on non-object)") {
+                val jsonSchema               = """{"type": "string", "description": "Old field", "deprecated": true}"""
+                val result                   = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                val (schema, frictionReport) = result.getOrElse((AnyValue(), FrictionReport()))
                 assertTrue(
                     result.isRight,
-                    result.map(_._1) == Right(Deprecated(Documented(Some("Old field"), TextValue())))
+                    schema == Deprecated(TextValue()),
+                    frictionReport.entries.exists(e => e.frictionType == FrictionType.Loss && e.message.contains("description on non-object"))
                 )
             }
         ),
