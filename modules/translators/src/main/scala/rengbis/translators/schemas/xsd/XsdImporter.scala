@@ -33,14 +33,16 @@ object XsdImporter:
             case Success(schemaElem) =>
                 if schemaElem.label != "schema" then Left(s"Expected xs:schema root element, got ${ schemaElem.label }")
                 else
-                    val context = TranslationContext()
+                    // Detect the XSD namespace prefix (commonly "xs" or "xsd")
+                    val xsPrefix = detectXsPrefix(schemaElem)
+                    val context  = TranslationContext(xsPrefix = xsPrefix)
 
                     // Extract global type definitions
-                    val globalTypes      = extractGlobalTypes(schemaElem)
+                    val globalTypes      = extractGlobalTypes(schemaElem, xsPrefix)
                     val contextWithTypes = context.withTypes(globalTypes)
 
                     // Find the root element
-                    val rootElements = (schemaElem \ "element").filter(_.prefix == "xs")
+                    val rootElements = (schemaElem \ "element").filter(_.prefix == xsPrefix)
                     rootElements.headOption match
                         case None           => Left("No root element found in XSD schema")
                         case Some(rootElem) =>
@@ -48,10 +50,17 @@ object XsdImporter:
                                 case Left(error)          => Left(error)
                                 case Right((schema, ctx)) => Right((schema, ctx.report))
 
+    /** Detects the namespace prefix used for XML Schema (e.g., "xs" or "xsd") */
+    private def detectXsPrefix(schemaElem: Elem): String =
+        // The schema element itself uses the XSD prefix, so we can just get its prefix
+        // If no prefix (default namespace), return empty string
+        Option(schemaElem.prefix).getOrElse("")
+
     private case class TranslationContext(
         path: String = "$",
         report: FrictionReport = FrictionReport(),
-        types: Map[String, Node] = Map.empty
+        types: Map[String, Node] = Map.empty,
+        xsPrefix: String = "xs"
     ):
         def atPath(newPath: String): TranslationContext =
             copy(path = if newPath.startsWith("$") then newPath else s"$path/$newPath")
@@ -69,11 +78,11 @@ object XsdImporter:
             copy(types = types ++ newTypes)
 
     /** Extracts global type definitions (complexType and simpleType) from the schema */
-    private def extractGlobalTypes(schemaElem: Elem): Map[String, Node] =
-        val complexTypes = (schemaElem \ "complexType").filter(_.prefix == "xs").flatMap { node =>
+    private def extractGlobalTypes(schemaElem: Elem, xsPrefix: String): Map[String, Node] =
+        val complexTypes = (schemaElem \ "complexType").filter(_.prefix == xsPrefix).flatMap { node =>
             (node \ "@name").headOption.map(_.text -> node)
         }
-        val simpleTypes  = (schemaElem \ "simpleType").filter(_.prefix == "xs").flatMap { node =>
+        val simpleTypes  = (schemaElem \ "simpleType").filter(_.prefix == xsPrefix).flatMap { node =>
             (node \ "@name").headOption.map(_.text -> node)
         }
         (complexTypes ++ simpleTypes).toMap
@@ -229,12 +238,12 @@ object XsdImporter:
 
     private def translateSimpleType(simpleTypeNode: Node, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         // Look for restriction
-        val restrictions = (simpleTypeNode \ "restriction").filter(_.prefix == "xs")
+        val restrictions = (simpleTypeNode \ "restriction").filter(_.prefix == context.xsPrefix)
         restrictions.headOption match
             case Some(restriction) => translateRestriction(restriction, context)
             case None              =>
                 // Check for list or union
-                val lists = (simpleTypeNode \ "list").filter(_.prefix == "xs")
+                val lists = (simpleTypeNode \ "list").filter(_.prefix == context.xsPrefix)
                 if lists.nonEmpty then
                     val ctx = context.addApproximation(
                         "XSD list type approximated as ListOfValues",
@@ -242,7 +251,7 @@ object XsdImporter:
                     )
                     Right((ListOfValues(TextValue()), ctx))
                 else
-                    val unions = (simpleTypeNode \ "union").filter(_.prefix == "xs")
+                    val unions = (simpleTypeNode \ "union").filter(_.prefix == context.xsPrefix)
                     if unions.nonEmpty then
                         val ctx = context.addApproximation(
                             "XSD union type approximated as AlternativeValues",
@@ -261,11 +270,11 @@ object XsdImporter:
             var currentCtx    = ctx
 
             // Enumeration facets
-            val enumerations = (restrictionNode \ "enumeration").filter(_.prefix == "xs").map(e => (e \ "@value").text)
+            val enumerations = (restrictionNode \ "enumeration").filter(_.prefix == context.xsPrefix).map(e => (e \ "@value").text)
             if enumerations.nonEmpty then currentSchema = EnumValues(enumerations*)
 
             // Pattern facet
-            val patterns = (restrictionNode \ "pattern").filter(_.prefix == "xs").map(p => (p \ "@value").text)
+            val patterns = (restrictionNode \ "pattern").filter(_.prefix == context.xsPrefix).map(p => (p \ "@value").text)
             patterns.headOption.foreach { pattern =>
                 currentSchema = currentSchema match
                     case TextValue(constraints, default) =>
@@ -274,9 +283,9 @@ object XsdImporter:
             }
 
             // Length facets
-            val length    = (restrictionNode \ "length").filter(_.prefix == "xs").headOption.map(l => (l \ "@value").text.toInt)
-            val minLength = (restrictionNode \ "minLength").filter(_.prefix == "xs").headOption.map(l => (l \ "@value").text.toInt)
-            val maxLength = (restrictionNode \ "maxLength").filter(_.prefix == "xs").headOption.map(l => (l \ "@value").text.toInt)
+            val length    = (restrictionNode \ "length").filter(_.prefix == context.xsPrefix).headOption.map(l => (l \ "@value").text.toInt)
+            val minLength = (restrictionNode \ "minLength").filter(_.prefix == context.xsPrefix).headOption.map(l => (l \ "@value").text.toInt)
+            val maxLength = (restrictionNode \ "maxLength").filter(_.prefix == context.xsPrefix).headOption.map(l => (l \ "@value").text.toInt)
 
             currentSchema = currentSchema match
                 case TextValue(constraints, default) =>
@@ -289,10 +298,10 @@ object XsdImporter:
                 case other                           => other
 
             // Numeric range facets
-            val minInclusive = (restrictionNode \ "minInclusive").filter(_.prefix == "xs").headOption.map(m => BigDecimal((m \ "@value").text))
-            val maxInclusive = (restrictionNode \ "maxInclusive").filter(_.prefix == "xs").headOption.map(m => BigDecimal((m \ "@value").text))
-            val minExclusive = (restrictionNode \ "minExclusive").filter(_.prefix == "xs").headOption.map(m => BigDecimal((m \ "@value").text))
-            val maxExclusive = (restrictionNode \ "maxExclusive").filter(_.prefix == "xs").headOption.map(m => BigDecimal((m \ "@value").text))
+            val minInclusive = (restrictionNode \ "minInclusive").filter(_.prefix == context.xsPrefix).headOption.map(m => BigDecimal((m \ "@value").text))
+            val maxInclusive = (restrictionNode \ "maxInclusive").filter(_.prefix == context.xsPrefix).headOption.map(m => BigDecimal((m \ "@value").text))
+            val minExclusive = (restrictionNode \ "minExclusive").filter(_.prefix == context.xsPrefix).headOption.map(m => BigDecimal((m \ "@value").text))
+            val maxExclusive = (restrictionNode \ "maxExclusive").filter(_.prefix == context.xsPrefix).headOption.map(m => BigDecimal((m \ "@value").text))
 
             currentSchema = currentSchema match
                 case NumericValue(constraints, default) =>
@@ -322,9 +331,9 @@ object XsdImporter:
 
     private def translateComplexType(complexTypeNode: Node, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         // Check for sequence, choice, or all
-        val sequences = (complexTypeNode \ "sequence").filter(_.prefix == "xs")
-        val choices   = (complexTypeNode \ "choice").filter(_.prefix == "xs")
-        val alls      = (complexTypeNode \ "all").filter(_.prefix == "xs")
+        val sequences = (complexTypeNode \ "sequence").filter(_.prefix == context.xsPrefix)
+        val choices   = (complexTypeNode \ "choice").filter(_.prefix == context.xsPrefix)
+        val alls      = (complexTypeNode \ "all").filter(_.prefix == context.xsPrefix)
 
         if sequences.nonEmpty then translateSequence(sequences.head, context)
         else if choices.nonEmpty then translateChoice(choices.head, context)
@@ -336,7 +345,7 @@ object XsdImporter:
             translateSequence(alls.head, ctx)
         else
             // Simple content or attributes only
-            val simpleContents = (complexTypeNode \ "simpleContent").filter(_.prefix == "xs")
+            val simpleContents = (complexTypeNode \ "simpleContent").filter(_.prefix == context.xsPrefix)
             if simpleContents.nonEmpty then
                 val ctx = context.addApproximation(
                     "XSD simpleContent with attributes converted to object",
@@ -346,7 +355,7 @@ object XsdImporter:
             else Right((AnyValue(), context))
 
     private def translateSequence(sequenceNode: Node, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
-        val elements = (sequenceNode \ "element").filter(_.prefix == "xs")
+        val elements = (sequenceNode \ "element").filter(_.prefix == context.xsPrefix)
 
         if elements.isEmpty then Right((AnyValue(), context))
         else
@@ -377,7 +386,7 @@ object XsdImporter:
             }
 
     private def translateChoice(choiceNode: Node, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
-        val elements = (choiceNode \ "element").filter(_.prefix == "xs")
+        val elements = (choiceNode \ "element").filter(_.prefix == context.xsPrefix)
 
         val results = elements.zipWithIndex.foldLeft[Either[String, (List[Schema], TranslationContext)]](Right((List.empty, context))):
             case (Right((schemas, ctx)), (elem, idx)) =>
