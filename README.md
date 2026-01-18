@@ -84,13 +84,13 @@ Here is a brief run down of the currently supported features:
 ## Types
 
 ### Basic type values
-ReNGBis supports four basic types, `text`, `number`, `boolean`, `binary`, and `any`.
-The code below defines a type that may be either a `text`, a `number`, a `boolean`, `binary`, or just `any` value.
+ReNGBis supports five basic types: `text`, `number`, `boolean`, `binary`, `time`, and `any`.
+The code below defines a type that may be either a `text`, a `number`, a `boolean`, `binary`, a `time` value, or just `any` value.
 This is just a dull example to list all the basic types, as it wouldn't make much sense to define a type like this, as it would match anything anyway.
 Besides the basic value types, it also shows the way to define alternative options (`|`) for a given value.
 
 ```rengbis
-= text | number | boolean | binary | any
+= text | number | boolean | binary | time [ format = 'iso8601' ] | any
 ```
 
 Basic values on their own would be pretty boring; but there are enough options to combine them together and keep it interesting (hopefully!).
@@ -223,6 +223,22 @@ So `binary` values can have an `encoding` option (with the following supported v
 And also a *size* constraint, expressed either in `bytes`, `KB`, `MB`, or `GB`.
 ```rengbis
 = binary [ encoding = 'base64', bytes == 32 ]
+```
+
+### Time constraints
+The `time` type represents temporal values (dates, times, or timestamps) with explicit format specification.
+
+Time values require a `format` constraint that defines the expected format:
+- **Named formats** (single-quoted): `'iso8601'`, `'iso8601-date'`, `'iso8601-time'`, `'iso8601-datetime'`, `'rfc3339'`
+- **Custom patterns** (double-quoted): using [Java DateTimeFormatter](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/time/format/DateTimeFormatter.html) pattern syntax
+
+```rengbis
+= {
+  created_at: time [ format = 'iso8601' ]
+  birth_date: time [ format = 'iso8601-date' ]
+  meeting_time: time [ format = 'iso8601-time' ]
+  custom_format: time [ format = "yyyy-MM-dd HH:mm" ]
+}
 ```
 
 ### List constraints

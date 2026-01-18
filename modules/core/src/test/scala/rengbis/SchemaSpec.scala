@@ -2,8 +2,8 @@ package rengbis
 
 import zio.test.{ assertTrue, ZIOSpecDefault }
 
-import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, Deprecated, Documented, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TupleValue }
-import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint }
+import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, Deprecated, Documented, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TimeValue, TupleValue }
+import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint, TimeConstraint }
 import rengbis.testHelpers.{ binBytes, listSize, numValue, textLength }
 
 object SchemaSpec extends ZIOSpecDefault:
@@ -15,7 +15,14 @@ object SchemaSpec extends ZIOSpecDefault:
             parseTest("= any", AnyValue()),
             parseTest("= number", NumericValue()),
             parseTest("= text", TextValue()),
-            parseTest("= binary", BinaryValue())
+            parseTest("= binary", BinaryValue()),
+            parseTest("= time [ format = 'iso8601' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601)),
+            parseTest("= time [ format = 'iso8601-date' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601_Date)),
+            parseTest("= time [ format = 'iso8601-time' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601_Time)),
+            parseTest("""= time [ format = "yyyy-MM-dd" ]""", TimeValue(TimeConstraint.CustomPattern("yyyy-MM-dd"))),
+            test("invalid time pattern should be rejected"):
+                val result = parse("""= time [ format = "INVALID" ]""")
+                assertTrue(result.isLeft)
         ),
         suite("List types")(
             parseTest("= number*", ListOfValues(NumericValue())),

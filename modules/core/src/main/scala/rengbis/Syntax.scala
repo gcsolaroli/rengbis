@@ -2,8 +2,8 @@ package rengbis
 
 import zio.Chunk
 import zio.parser.{ AnySyntaxOps, Parser, ParserOps, Printer, StringErrSyntaxOps, StringParserError, Syntax, SyntaxOps }
-import Schema.{ AlternativeValues, BinaryValue, Deprecated, Documented, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue }
-import Schema.{ BinaryConstraint, BoundConstraint, BoundOp, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint }
+import Schema.{ AlternativeValues, BinaryValue, Deprecated, Documented, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue, TimeValue }
+import Schema.{ BinaryConstraint, BoundConstraint, BoundOp, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint, TimeConstraint }
 
 object SchemaSyntax:
     import Extensions.*
@@ -182,6 +182,41 @@ object SchemaSyntax:
         binaryValue => if binaryValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(binaryValue.constraints)))
     )
 
+    val namedTimeFormat: SchemaSyntax[TimeConstraint.NamedFormat] =
+        Syntax.string("'iso8601'", TimeConstraint.NamedFormat.ISO8601)
+            <> Syntax.string("'iso8601-datetime'", TimeConstraint.NamedFormat.ISO8601_DateTime)
+            <> Syntax.string("'iso8601-date'", TimeConstraint.NamedFormat.ISO8601_Date)
+            <> Syntax.string("'iso8601-time'", TimeConstraint.NamedFormat.ISO8601_Time)
+            <> Syntax.string("'rfc3339'", TimeConstraint.NamedFormat.RFC3339)
+
+    val customTimePattern: SchemaSyntax[TimeConstraint.CustomPattern] = quotedString.transformEither(
+        pattern =>
+            try Right(TimeConstraint.CustomPattern(pattern))
+            catch case e: IllegalArgumentException => Left(s"Invalid time pattern '$pattern': ${ e.getMessage }"),
+
+        c => Right(c.pattern)
+    )
+
+    val timeFormatConstraint: SchemaSyntax[TimeConstraint.Constraint] =
+        Syntax.string("format", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> (
+            namedTimeFormat.as[TimeConstraint.Constraint] { case f: TimeConstraint.NamedFormat => f }
+                <> customTimePattern.as[TimeConstraint.Constraint] { case p: TimeConstraint.CustomPattern => p }
+        )
+
+    val timeConstraints: SchemaSyntax[Chunk[TimeConstraint.Constraint]] =
+        timeFormatConstraint.+
+
+    val timeConstraintBlock: SchemaSyntax[Chunk[TimeConstraint.Constraint]] = (
+        whitespaces ~ Syntax.char('[') ~ whitespaces ~> timeConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')
+    ).transform(_.flatten, Chunk(_))
+
+    val timeValue: SchemaSyntax[Schema.TimeValue] = (
+        Syntax.string("time", ()) ~ timeConstraintBlock.optional
+    ).transform(
+        constraints => TimeValue(constraints.getOrElse(Chunk()).toList*),
+        timeValue => if timeValue.constraints.isEmpty then None else Some(Chunk.fromIterable(timeValue.constraints))
+    )
+
     val label: SchemaSyntax[String] = (Syntax.letter ~ (Syntax.alphaNumeric <> Syntax.charIn("_-")).repeat0).string
 
     val madatoryLabel: SchemaSyntax[MandatoryLabel] = label.transform(
@@ -292,6 +327,7 @@ object SchemaSyntax:
             <> booleanValue.asSchema { case b: Schema.BooleanValue => b }
             <> numericValue.asSchema { case n: Schema.NumericValue => n }
             <> binaryValue.asSchema { case b: Schema.BinaryValue => b }
+            <> timeValue.asSchema { case d: Schema.TimeValue => d }
             <> textValue.asSchema { case t: Schema.TextValue => t }
             <> givenTextValue.asSchema { case g: Schema.GivenTextValue => g }
             <> mapValue.asSchema { case m: Schema.MapValue => m }

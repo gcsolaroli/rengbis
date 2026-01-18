@@ -2,8 +2,8 @@ package rengbis
 
 import java.nio.file.Path
 import zio.Chunk
-import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, Deprecated, Documented, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TupleValue }
-import rengbis.Schema.{ BinaryConstraint, BoundOp, ListConstraint, NumericConstraint, TextConstraint }
+import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, Deprecated, Documented, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TimeValue, TupleValue }
+import rengbis.Schema.{ BinaryConstraint, BoundOp, ListConstraint, NumericConstraint, TextConstraint, TimeConstraint }
 import rengbis.Schema.BinaryConstraint.BinaryToTextEncoder
 import rengbis.Schema.BinaryValue as SchemaBinaryValue
 import scala.util.{ Failure, Success, Try }
@@ -153,6 +153,21 @@ object Validator:
             val sizeConstraints = constraints.collect { case c: BinaryConstraint.Size => c }
             ValidationResult.summarize(sizeConstraints.map(c => validateSizeConstraint(c, data)))
 
+    object TimeValidation:
+        import java.time.{ LocalDate, LocalTime }
+
+        def validateFormatConstraint(formatConstraint: TimeConstraint.FormatConstraint, text: String): ValidationResult =
+            Try(LocalTime.parse(text, formatConstraint.formatter))
+                // .orElse(Try(OffsetDateTime.parse(text, formatConstraint.formatter)))
+                // .orElse(Try(LocalDateTime.parse(text, formatConstraint.formatter)))
+                // .orElse(Try(ZonedDateTime.parse(text, formatConstraint.formatter)))
+                .orElse(Try(LocalDate.parse(text, formatConstraint.formatter))) match
+                case Success(_) => ValidationResult.valid
+                case Failure(e) => ValidationResult.reportError(s"time format ${ formatConstraint.name } not matching: ${ e.getMessage }")
+
+        def validateConstraints(constraint: TimeConstraint.Constraint, text: String): ValidationResult = constraint match
+            case fc: TimeConstraint.FormatConstraint => validateFormatConstraint(fc, text)
+
     object ListValidation:
         def validateConstraints(constraint: ListConstraint.Constraint, list: Chunk[Value], itemSchema: Schema): ValidationResult =
             val size = list.size
@@ -275,6 +290,10 @@ object Validator:
                         case None           =>
                             ValidationResult.valid
                 case _                       => ValidationResult.reportError(s"expected binary value; ${ value.valueTypeDescription } found [value: ${ value }]")
+        case TimeValue(constraints*)         =>
+            value match
+                case Value.TextValue(text) => ValidationResult.summarize(constraints.map(c => TimeValidation.validateConstraints(c, text)))
+                case _                     => ValidationResult.reportError(s"expected time value (as text); ${ value.valueTypeDescription } found [value: ${ value }]")
         case EnumValues(values*)             =>
             value match
                 case Value.TextValue(value) => if (values.contains(value)) then ValidationResult.valid else ValidationResult.reportError(s"enum type does not include provided value: '${ value }'")
