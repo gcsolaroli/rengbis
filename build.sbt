@@ -34,7 +34,7 @@ lazy val root = project
         version        := RENGBIS_VERSION,
         publish / skip := true
     )
-    .aggregate(core, cli)
+    .aggregate(core, translators, cli)
     .settings(
         // Shortcuts: assembly for core (library JAR), execjar/nativeImage for cli (executables)
         assembly / aggregate    := false,
@@ -62,6 +62,16 @@ lazy val core = project
             case x                                         => MergeStrategy.first
         }
     )
+
+lazy val translators = project
+    .in(file("modules/translators"))
+    .dependsOn(core)
+    .settings(
+        name    := "rengbis-translators",
+        version := RENGBIS_VERSION
+    )
+    .settings(translatorsDependencies)
+    .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
 
 lazy val cli = project
     .in(file("modules/cli"))
@@ -132,6 +142,17 @@ lazy val coreDependencies = Seq(
         "dev.hnaderi"            %% "yaml4s-backend"  % yaml4s_version,
         "dev.hnaderi"            %% "yaml4s-zio-json" % yaml4s_version,
         "com.github.tototoshi"   %% "scala-csv"       % tototoshi_csv_version
+    ),
+    libraryDependencies ++= Seq(
+        "dev.zio" %% "zio-test"     % zio,
+        "dev.zio" %% "zio-test-sbt" % zio
+    ).map(_ % Test)
+)
+
+lazy val translatorsDependencies = Seq(
+    libraryDependencies ++= Seq(
+        "dev.zio" %% "zio"      % zio,
+        "dev.zio" %% "zio-json" % zio_json
     ),
     libraryDependencies ++= Seq(
         "dev.zio" %% "zio-test"     % zio,
