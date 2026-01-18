@@ -15,7 +15,7 @@ object Main extends ZIOCliDefault:
         case Json, Yaml, Xml, Csv
 
     enum SchemaFormat:
-        case Xsd, JsonSchema
+        case Xsd, JsonSchema, Avro
 
     enum RengbisCommand:
         case ValidateSchema(schemaFiles: List[Path])
@@ -37,9 +37,10 @@ object Main extends ZIOCliDefault:
         Options
             .enumeration[SchemaFormat]("format")(
                 "xsd"        -> SchemaFormat.Xsd,
-                "jsonschema" -> SchemaFormat.JsonSchema
+                "jsonschema" -> SchemaFormat.JsonSchema,
+                "avro"       -> SchemaFormat.Avro
             )
-            .alias("f") ?? "Schema format (xsd, jsonschema)"
+            .alias("f") ?? "Schema format (xsd, jsonschema, avro)"
 
     def schemaFileOption(exists: Exists = Exists.Yes): Options[Path] =
         Options
@@ -183,6 +184,7 @@ object Main extends ZIOCliDefault:
     def translateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], reportPath: Option[Path]): ZIO[Any, Throwable, Unit] =
         import rengbis.translators.schemas.xsd.{ XsdImporter, XsdExporter }
         import rengbis.translators.schemas.jsonschema.{ JsonSchemaImporter, JsonSchemaExporter }
+        import rengbis.translators.schemas.avro.{ AvroImporter, AvroExporter }
         import rengbis.translators.common.FrictionReport
 
         for
@@ -191,6 +193,7 @@ object Main extends ZIOCliDefault:
                                            format match
                                                case SchemaFormat.Xsd        => XsdImporter.fromXsd(sourceContent)
                                                case SchemaFormat.JsonSchema => JsonSchemaImporter.fromJsonSchema(sourceContent)
+                                               case SchemaFormat.Avro       => AvroImporter.fromAvro(sourceContent)
                                        }.mapError(e => new RuntimeException(s"Failed to import schema: $e"))
             (schema, frictionReport) = result
             output                  <- ZIO.fromEither(SchemaSyntax.items.printString(schema).left.map(e => new RuntimeException(s"Failed to serialize schema: $e")))
@@ -211,6 +214,7 @@ object Main extends ZIOCliDefault:
     def translateSchemaTo(format: SchemaFormat, source: Path, target: Option[Path], reportPath: Option[Path], rootName: Option[String]): ZIO[Any, Throwable, Unit] =
         import rengbis.translators.schemas.xsd.{ XsdImporter, XsdExporter }
         import rengbis.translators.schemas.jsonschema.{ JsonSchemaImporter, JsonSchemaExporter }
+        import rengbis.translators.schemas.avro.{ AvroImporter, AvroExporter }
         import rengbis.translators.common.FrictionReport
         import zio.json.EncoderOps
 
@@ -220,6 +224,9 @@ object Main extends ZIOCliDefault:
                                               case SchemaFormat.Xsd        => XsdExporter.toXsd(schema.root.get, rootName.getOrElse("root"))
                                               case SchemaFormat.JsonSchema =>
                                                   val (json, report) = JsonSchemaExporter.toJsonSchema(schema.root.get)
+                                                  (json.toJsonPretty, report)
+                                              case SchemaFormat.Avro       =>
+                                                  val (json, report) = AvroExporter.toAvro(schema.root.get, rootName.getOrElse("Record"))
                                                   (json.toJsonPretty, report)
             output                      = outputRaw
             _                          <- target match
