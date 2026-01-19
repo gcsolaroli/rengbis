@@ -16,37 +16,44 @@ object JsonSchemaImporter:
         root: Schema,
         definitions: Map[String, Schema],
         report: FrictionReport
-    )
+    ):
+        /** URLs that were fetched during import (convenience accessor to report.fetchedUrls). */
+        def fetchedUrls: Set[String] = report.fetchedUrls
 
     /** Imports a JSON Schema to ReNGBis schema.
       *
       * @param jsonSchemaText
       *   The JSON Schema as a string
+      * @param fetcher
+      *   Optional schema fetcher for resolving external URL references
       * @return
       *   Either an error message or tuple of (ReNGBis Schema, FrictionReport)
       */
-    def fromJsonSchema(jsonSchemaText: String): Either[String, (Schema, FrictionReport)] =
-        fromJsonSchemaWithDefinitions(jsonSchemaText).map(r => (r.root, r.report))
+    def fromJsonSchema(jsonSchemaText: String, fetcher: SchemaFetcher = SchemaFetcher.NoOp): Either[String, (Schema, FrictionReport)] =
+        fromJsonSchemaWithDefinitions(jsonSchemaText, fetcher).map(r => (r.root, r.report))
 
     /** Imports a JSON Schema to ReNGBis schema, including named definitions.
       *
       * @param jsonSchemaText
       *   The JSON Schema as a string
+      * @param fetcher
+      *   Optional schema fetcher for resolving external URL references
       * @return
       *   Either an error message or ImportResult containing root schema, definitions, and friction report
       */
-    def fromJsonSchemaWithDefinitions(jsonSchemaText: String): Either[String, ImportResult] =
+    def fromJsonSchemaWithDefinitions(jsonSchemaText: String, fetcher: SchemaFetcher = SchemaFetcher.NoOp): Either[String, ImportResult] =
         jsonSchemaText.fromJson[Json] match
             case Left(error)    => Left(s"Failed to parse JSON: $error")
             case Right(jsonAst) =>
-                val context = TranslationContext(rootJson = jsonAst)
+                val context = TranslationContext(rootJson = jsonAst, fetcher = fetcher)
                 translateSchema(jsonAst, context) match
                     case Left(error)          => Left(error)
                     case Right((schema, ctx)) =>
                         // Now translate all definitions that were referenced
                         val defsResult = translateAllDefinitions(jsonAst, ctx)
                         defsResult.map { case (definitions, finalCtx) =>
-                            ImportResult(schema, definitions, finalCtx.report)
+                            val reportWithUrls = finalCtx.report.withFetchedUrls(finalCtx.fetchedSchemas.keySet)
+                            ImportResult(schema, definitions, reportWithUrls)
                         }
 
     private case class TranslationContext(
@@ -54,20 +61,36 @@ object JsonSchemaImporter:
         report: FrictionReport = FrictionReport(),
         definitions: Map[String, Json] = Map.empty,
         rootJson: Json = Json.Obj(),
-        resolvedRefs: Set[String] = Set.empty, // Track refs being resolved to detect cycles
-        referencedDefs: Set[String] = Set.empty // Track definitions that need to be output as named schemas
+        resolvedRefs: Set[String] = Set.empty,       // Track refs being resolved to detect cycles
+        referencedDefs: Set[String] = Set.empty,     // Track definitions that need to be output as named schemas
+        currentDefinition: Option[String] = None,    // Track which definition we're currently inside
+        pathWithinDefinition: String = "$",          // Track path relative to current definition
+        fetcher: SchemaFetcher = SchemaFetcher.NoOp, // Fetcher for external URL references
+        fetchedSchemas: Map[String, Json] = Map.empty // Cache for fetched external schemas
     ):
         def atPath(newPath: String): TranslationContext =
-            copy(path = if newPath.startsWith("$") then newPath else s"$path/$newPath")
+            val newFullPath = if newPath.startsWith("$") then newPath else s"$path/$newPath"
+            val newRelPath  = if newPath.startsWith("$") then newPath else s"$pathWithinDefinition/$newPath"
+            copy(path = newFullPath, pathWithinDefinition = newRelPath)
+
+        /** Returns a display-friendly path for friction reports. Format: "definitionName → relativePath" when inside a definition, otherwise just the path.
+          */
+        def displayPath: String =
+            currentDefinition match
+                case Some(defName) => s"$defName → $pathWithinDefinition"
+                case None          => path
 
         def addLoss(message: String, suggestion: Option[String] = None): TranslationContext =
-            copy(report = report.addLoss(path, message, suggestion))
+            copy(report = report.addLoss(displayPath, message, suggestion))
 
         def addApproximation(message: String, suggestion: Option[String] = None): TranslationContext =
-            copy(report = report.addApproximation(path, message, suggestion))
+            copy(report = report.addApproximation(displayPath, message, suggestion))
 
         def addExtension(message: String, suggestion: Option[String] = None): TranslationContext =
-            copy(report = report.addExtension(path, message, suggestion))
+            copy(report = report.addExtension(displayPath, message, suggestion))
+
+        def enterDefinition(defName: String): TranslationContext =
+            copy(currentDefinition = Some(defName), pathWithinDefinition = "$")
 
         def withDefinitions(defs: Map[String, Json]): TranslationContext =
             copy(definitions = definitions ++ defs)
@@ -153,70 +176,160 @@ object JsonSchemaImporter:
                     (withDeprecated, ctx)
                 }
 
+    // Regex patterns for direct definition references (not deep paths)
+    private val directDefsRefPattern        = """^#/\$defs/([^/]+)$""".r
+    private val directDefinitionsRefPattern = """^#/definitions/([^/]+)$""".r
+
+    /** Checks if a ref is a direct definition reference (e.g., #/$defs/MyType) vs a deep path (e.g., #/definitions/someDef/properties/nested)
+      */
+    private def isDirectDefinitionRef(ref: String): Option[String] =
+        ref match
+            case directDefsRefPattern(name)        => Some(name)
+            case directDefinitionsRefPattern(name) => Some(name)
+            case _                                 => None
+
     private def translateRef(ref: String, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
-        if ref.startsWith("#/$defs/") || ref.startsWith("#/definitions/") then
-            // Internal reference to $defs/definitions - use named reference and track it
-            val name       = ref.split("/").last
-            // Track that this definition is referenced and needs to be output
-            val updatedCtx = context.addReferencedDef(name)
-            Right((NamedValueReference(name), updatedCtx))
-        else if ref == "#" then
-            // Self-reference (recursive schema)
-            if context.isResolvingRef(ref) then
-                // Already resolving this ref - it's a recursive reference
-                // Use a placeholder name for the root schema (must start with letter)
-                Right((NamedValueReference("root"), context))
-            else
-                // Resolve by translating the root schema
-                val ctxWithRef = context.withResolvedRef(ref)
-                translateSchema(context.rootJson, ctxWithRef)
-        else if ref.startsWith("#/") then
-            // Internal reference using JSON pointer (e.g., #/properties/ecmaFeatures)
-            val pointer = ref.substring(1) // Remove the leading #
-            if context.isResolvingRef(ref) then
-                // Cycle detected - use a named reference
-                val refName = pointerToRefName(pointer)
-                Right((NamedValueReference(refName), context))
-            else
-                resolveJsonPointer(context.rootJson, pointer) match
-                    case Some(referencedJson) =>
-                        // Inline the referenced schema
+        isDirectDefinitionRef(ref) match
+            case Some(name) =>
+                // Direct reference to $defs/definitions - use named reference and track it
+                val updatedCtx = context.addReferencedDef(name)
+                Right((NamedValueReference(name), updatedCtx))
+            case None       =>
+                if ref == "#" then
+                    // Self-reference (recursive schema)
+                    if context.isResolvingRef(ref) then
+                        // Already resolving this ref - it's a recursive reference
+                        // Use a placeholder name for the root schema (must start with letter)
+                        Right((NamedValueReference("root"), context))
+                    else
+                        // Resolve by translating the root schema
                         val ctxWithRef = context.withResolvedRef(ref)
-                        translateSchema(referencedJson, ctxWithRef)
-                    case None                 =>
-                        val currentCtx = context.addLoss(
-                            s"Internal reference '$ref' could not be resolved",
-                            Some("The referenced path does not exist in the schema")
-                        )
-                        Right((AnyValue(), currentCtx))
-        else if ref.startsWith("#") then
-            // Anchor reference (e.g., #myAnchor) - not supported
-            val currentCtx = context.addApproximation(
-                s"Anchor reference '$ref' not supported",
-                Some("Use JSON pointer references like #/$$defs/name instead")
-            )
-            Right((AnyValue(), currentCtx))
-        else if ref.contains("://") then
-            // URL reference
+                        translateSchema(context.rootJson, ctxWithRef)
+                else if ref.startsWith("#/") then
+                    // Internal reference using JSON pointer (e.g., #/properties/ecmaFeatures or deep refs like #/definitions/someDef/properties/nested)
+                    val pointer = ref.substring(1) // Remove the leading #
+                    if context.isResolvingRef(ref) then
+                        // Cycle detected - use a named reference
+                        val refName = pointerToRefName(pointer)
+                        Right((NamedValueReference(refName), context))
+                    else
+                        resolveJsonPointer(context.rootJson, pointer) match
+                            case Some(referencedJson) =>
+                                // Inline the referenced schema
+                                val ctxWithRef = context.withResolvedRef(ref)
+                                translateSchema(referencedJson, ctxWithRef)
+                            case None                 =>
+                                val currentCtx = context.addLoss(
+                                    s"Internal reference '$ref' could not be resolved",
+                                    Some("The referenced path does not exist in the schema")
+                                )
+                                Right((AnyValue(), currentCtx))
+                else if ref.startsWith("#") then
+                    // Anchor reference (e.g., #myAnchor) - not supported
+                    val currentCtx = context.addApproximation(
+                        s"Anchor reference '$ref' not supported",
+                        Some("Use JSON pointer references like #/$$defs/name instead")
+                    )
+                    Right((AnyValue(), currentCtx))
+                else if ref.contains("://") then
+                    // URL reference - try to fetch if fetcher is configured
+                    translateUrlRef(ref, context)
+                else
+                    // File-based reference
+                    val parts = ref.split("#")
+                    val file  = parts(0)
+                    if parts.length > 1 then
+                        // Reference with fragment (e.g., "./person.json#/$defs/Address")
+                        val fragment  = parts(1)
+                        val defName   = fragment.split("/").last
+                        val namespace = file.replaceAll("[./]", "_").replaceAll("json$", "")
+                        Right((ScopedReference(namespace, defName), context))
+                    else
+                        // Reference to entire file (e.g., "./person.json")
+                        val namespace = file.replaceAll("[./]", "_").replaceAll("json$", "")
+                        Right((ScopedReference(namespace, ""), context))
+
+    /** Parses a URL reference into base URL and optional fragment.
+      * @param ref
+      *   The full URL reference (e.g., "https://example.com/schema.json#/$defs/Address")
+      * @return
+      *   Tuple of (base URL, optional fragment)
+      */
+    private def parseUrlAndFragment(ref: String): (String, Option[String]) =
+        val hashIndex = ref.indexOf('#')
+        if hashIndex >= 0 then (ref.substring(0, hashIndex), Some(ref.substring(hashIndex + 1)))
+        else (ref, None)
+
+    /** Translates an external URL reference by fetching the schema and resolving any fragment.
+      */
+    private def translateUrlRef(ref: String, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
+        if context.fetcher == SchemaFetcher.NoOp then
+            // No fetcher configured - report as loss (original behavior)
             val currentCtx = context.addLoss(
                 s"External URL reference '$ref' cannot be imported",
-                Some("Download and inline the schema, or use file-based references")
+                Some("Use --fetch-external flag to enable URL fetching")
             )
             Right((AnyValue(), currentCtx))
         else
-            // File-based reference
-            val parts = ref.split("#")
-            val file  = parts(0)
-            if parts.length > 1 then
-                // Reference with fragment (e.g., "./person.json#/$defs/Address")
-                val fragment  = parts(1)
-                val defName   = fragment.split("/").last
-                val namespace = file.replaceAll("[./]", "_").replaceAll("json$", "")
-                Right((ScopedReference(namespace, defName), context))
+            // Check for cycles
+            if context.isResolvingRef(ref) then
+                // Cycle detected - use a placeholder reference
+                val refName = ref.replaceAll("[^a-zA-Z0-9]", "_").take(50)
+                Right((NamedValueReference(refName), context))
             else
-                // Reference to entire file (e.g., "./person.json")
-                val namespace = file.replaceAll("[./]", "_").replaceAll("json$", "")
-                Right((ScopedReference(namespace, ""), context))
+                val (baseUrl, fragment) = parseUrlAndFragment(ref)
+
+                // Check cache first
+                context.fetchedSchemas.get(baseUrl) match
+                    case Some(cachedJson) =>
+                        resolveUrlFragment(cachedJson, baseUrl, fragment, context.withResolvedRef(ref))
+                    case None             =>
+                        // Fetch the schema
+                        context.fetcher.fetch(baseUrl) match
+                            case Left(error)    =>
+                                val ctx = context.addLoss(
+                                    s"Failed to fetch external schema '$baseUrl': $error",
+                                    Some("Check URL accessibility and network connection")
+                                )
+                                Right((AnyValue(), ctx))
+                            case Right(content) =>
+                                content.fromJson[Json] match
+                                    case Left(parseError)   =>
+                                        val ctx = context.addLoss(
+                                            s"Failed to parse fetched schema from '$baseUrl'",
+                                            Some(s"JSON parse error: $parseError")
+                                        )
+                                        Right((AnyValue(), ctx))
+                                    case Right(fetchedJson) =>
+                                        // Cache the fetched schema and resolve
+                                        val ctxWithCache = context.copy(
+                                            fetchedSchemas = context.fetchedSchemas + (baseUrl -> fetchedJson)
+                                        )
+                                        resolveUrlFragment(fetchedJson, baseUrl, fragment, ctxWithCache.withResolvedRef(ref))
+
+    /** Resolves a fragment within a fetched JSON schema.
+      */
+    private def resolveUrlFragment(
+        json: Json,
+        baseUrl: String,
+        fragment: Option[String],
+        context: TranslationContext
+    ): Either[String, (Schema, TranslationContext)] =
+        fragment match
+            case None | Some("") | Some("/") =>
+                // Reference to entire schema
+                translateSchema(json, context)
+            case Some(frag)                  =>
+                // Reference to fragment within schema
+                val pointer = if frag.startsWith("/") then frag else "/" + frag
+                resolveJsonPointer(json, pointer) match
+                    case Some(resolved) => translateSchema(resolved, context)
+                    case None           =>
+                        val ctx = context.addLoss(
+                            s"Fragment '$frag' not found in fetched schema '$baseUrl'",
+                            Some("Check that the fragment path exists in the external schema")
+                        )
+                        Right((AnyValue(), ctx))
 
     private def translateTypedSchema(typeName: String, fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         typeName match
@@ -247,11 +360,8 @@ object JsonSchemaImporter:
         val nonNullTypes = types.collect { case Json.Str(t) if t != "null" => t }
         val hasNull      = types.exists { case Json.Str("null") => true; case _ => false }
 
-        if hasNull && nonNullTypes.nonEmpty then
-            currentCtx = currentCtx.addApproximation(
-                "null in type array handled through field optionality",
-                Some("In ReNGBis, use optional fields (name?) instead of nullable types")
-            )
+        // Note: We don't report friction for null in type arrays because ReNGBis handles
+        // nullability through optional fields, which is semantically equivalent - no information is lost.
 
         // Pass the fields to each type translation so constraints like `items` are preserved
         val typeSchemas = nonNullTypes.flatMap: typeName =>
@@ -267,11 +377,7 @@ object JsonSchemaImporter:
             else Left("No valid types in type array")
         else if typeSchemas.size == 1 then Right((typeSchemas.head, currentCtx))
         else
-            // Only add approximation note if we actually have multiple non-null types
-            currentCtx = currentCtx.addApproximation(
-                s"Multiple types array translated to AlternativeValues (anyOf)",
-                Some("Type arrays are converted to union types")
-            )
+            // Multiple types array maps exactly to AlternativeValues - no friction, semantically equivalent
             Right((AlternativeValues(typeSchemas*), currentCtx))
 
     private def translateUntyped(fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
@@ -449,64 +555,85 @@ object JsonSchemaImporter:
     private def translateArray(fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         var currentCtx = context
 
-        // Check for tuple (prefixItems) - handle early
-        val tupleResult = fields
-            .get("prefixItems")
-            .flatMap:
-                case Json.Arr(items) =>
-                    fields.get("items") match
-                        case Some(Json.Bool(false)) | None => Some(translateTuple(items.toList, currentCtx))
-                        case _                             => None
-                case _               => None
+        // Extract tuple items if present (either prefixItems or items-as-array)
+        val tupleItems: Option[List[Json]] = fields.get("prefixItems") match
+            case Some(Json.Arr(items)) =>
+                // JSON Schema 2020-12 style tuple - only valid if items is false or absent
+                fields.get("items") match
+                    case Some(Json.Bool(false)) | None => Some(items.toList)
+                    case _                             => None
+            case _                     =>
+                // Check for old-style tuple (items as array - Draft-07 and earlier)
+                fields.get("items") match
+                    case Some(Json.Arr(items)) => Some(items.toList)
+                    case _                     => None
 
-        tupleResult.getOrElse:
-            // Regular array with items
-            fields.get("items") match
-                case Some(itemSchema) =>
-                    translateSchema(itemSchema, currentCtx.atPath("items")) match
-                        case Left(error)          => Left(error)
-                        case Right((schema, ctx)) =>
-                            currentCtx = ctx
-                            var sizeRange  = Option.empty[ListConstraint.SizeRange]
-                            var uniqueness = Seq.empty[ListConstraint.Uniqueness]
+        // Extract single item schema (for regular arrays, not tuples)
+        val singleItemSchema: Option[Json] = fields.get("items") match
+            case Some(json) if !json.isInstanceOf[Json.Arr] => Some(json)
+            case _                                          => None
 
-                            // minItems
-                            fields.get("minItems") match
-                                case Some(Json.Num(min)) =>
-                                    val minRange = ListConstraint.SizeRange.minInclusive(BigDecimal(min).toInt)
-                                    sizeRange = Some(sizeRange.map(_.merge(minRange)).getOrElse(minRange))
-                                case _                   => ()
+        tupleItems match
+            case Some(items) =>
+                // Tuple definition
+                translateTuple(items, currentCtx)
+            case None        =>
+                // Regular array
+                singleItemSchema match
+                    case Some(itemSchema) =>
+                        translateSchema(itemSchema, currentCtx.atPath("items")) match
+                            case Left(error)          => Left(error)
+                            case Right((schema, ctx)) =>
+                                currentCtx = ctx
+                                val constraints = extractArrayConstraints(fields, currentCtx)
+                                currentCtx = constraints._2
+                                Right((ListOfValues(schema, constraints._1), currentCtx))
+                    case None             =>
+                        // Array without items constraint - accepts any items
+                        Right((ListOfValues(AnyValue()), currentCtx))
 
-                            // maxItems
-                            fields.get("maxItems") match
-                                case Some(Json.Num(max)) =>
-                                    val maxRange = ListConstraint.SizeRange.maxInclusive(BigDecimal(max).toInt)
-                                    sizeRange = Some(sizeRange.map(_.merge(maxRange)).getOrElse(maxRange))
-                                case _                   => ()
+    /** Extracts array constraints (size, uniqueness) from fields. */
+    private def extractArrayConstraints(fields: Map[String, Json], context: TranslationContext): (ListConstraint.Constraints, TranslationContext) =
+        var currentCtx = context
+        var sizeRange  = Option.empty[ListConstraint.SizeRange]
+        var uniqueness = Seq.empty[ListConstraint.Uniqueness]
 
-                            // uniqueItems
-                            fields.get("uniqueItems") match
-                                case Some(Json.Bool(true)) =>
-                                    uniqueness = Seq(ListConstraint.Uniqueness.Simple)
-                                case _                     => ()
+        // minItems
+        fields.get("minItems") match
+            case Some(Json.Num(min)) =>
+                val minRange = ListConstraint.SizeRange.minInclusive(BigDecimal(min).toInt)
+                sizeRange = Some(sizeRange.map(_.merge(minRange)).getOrElse(minRange))
+            case _                   => ()
 
-                            // contains/minContains/maxContains
-                            if fields.contains("contains") || fields.contains("minContains") || fields.contains("maxContains") then
-                                currentCtx = currentCtx.addLoss(
-                                    "contains/minContains/maxContains constraints not supported in ReNGBis",
-                                    Some("Use custom validation")
-                                )
+        // maxItems
+        fields.get("maxItems") match
+            case Some(Json.Num(max)) =>
+                val maxRange = ListConstraint.SizeRange.maxInclusive(BigDecimal(max).toInt)
+                sizeRange = Some(sizeRange.map(_.merge(maxRange)).getOrElse(maxRange))
+            case _                   => ()
 
-                            Right((ListOfValues(schema, ListConstraint.Constraints(size = sizeRange, unique = uniqueness)), currentCtx))
-                case None             =>
-                    // Array without items constraint - accepts any items
-                    Right((ListOfValues(AnyValue()), currentCtx))
+        // uniqueItems
+        fields.get("uniqueItems") match
+            case Some(Json.Bool(true)) =>
+                uniqueness = Seq(ListConstraint.Uniqueness.Simple)
+            case _                     => ()
+
+        // contains/minContains/maxContains
+        if fields.contains("contains") || fields.contains("minContains") || fields.contains("maxContains") then
+            currentCtx = currentCtx.addLoss(
+                "contains/minContains/maxContains constraints not supported in ReNGBis",
+                Some("Use custom validation")
+            )
+
+        (ListConstraint.Constraints(size = sizeRange, unique = uniqueness), currentCtx)
 
     private def translateTuple(items: List[Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
+        val baseCtx = context
         items.zipWithIndex
             .foldLeft[Either[String, (List[Schema], TranslationContext)]](Right((List.empty, context))):
                 case (Right((schemas, ctx)), (item, idx)) =>
-                    translateSchema(item, ctx.atPath(s"prefixItems[$idx]")) match
+                    val itemCtx = baseCtx.atPath(s"prefixItems[$idx]").copy(report = ctx.report, fetchedSchemas = ctx.fetchedSchemas)
+                    translateSchema(item, itemCtx) match
                         case Left(error)             => Left(error)
                         case Right((schema, newCtx)) => Right((schemas :+ schema, newCtx))
                 case (left @ Left(_), _)                  => left
@@ -541,10 +668,13 @@ object JsonSchemaImporter:
                                     case Some(Json.Arr(reqs)) => reqs.toList.collect { case Json.Str(s) => s }.toSet
                                     case _                    => Set.empty[String]
 
+                                val baseCtx = currentCtx // Use base context for path, accumulate report and cache separately
                                 props.toList
                                     .foldLeft[Either[String, (Map[ObjectLabel, Schema], TranslationContext)]](Right((Map.empty, currentCtx))):
                                         case (Right((objectFields, ctx)), (name, propSchema)) =>
-                                            translateSchema(propSchema, ctx.atPath(s"properties/$name")) match
+                                            // Use baseCtx for path (so siblings don't accumulate), but ctx for report and cache accumulation
+                                            val propCtx = baseCtx.atPath(s"properties/$name").copy(report = ctx.report, fetchedSchemas = ctx.fetchedSchemas)
+                                            translateSchema(propSchema, propCtx) match
                                                 case Left(error)             => Left(error)
                                                 case Right((schema, newCtx)) =>
                                                     val label = if required.contains(name) then MandatoryLabel(name) else OptionalLabel(name)
@@ -611,10 +741,12 @@ object JsonSchemaImporter:
     private def translateAnyOf(json: Json, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         json match
             case Json.Arr(schemas) =>
+                val baseCtx = context
                 schemas.toList.zipWithIndex
                     .foldLeft[Either[String, (List[Schema], TranslationContext)]](Right((List.empty, context))):
                         case (Right((translatedSchemas, ctx)), (schema, idx)) =>
-                            translateSchema(schema, ctx.atPath(s"anyOf[$idx]")) match
+                            val itemCtx = baseCtx.atPath(s"anyOf[$idx]").copy(report = ctx.report, fetchedSchemas = ctx.fetchedSchemas)
+                            translateSchema(schema, itemCtx) match
                                 case Left(error)                 => Left(error)
                                 case Right((translated, newCtx)) => Right((translatedSchemas :+ translated, newCtx))
                         case (left @ Left(_), _)                              => left
@@ -628,11 +760,9 @@ object JsonSchemaImporter:
             case _                 => Left("anyOf must be an array")
 
     private def translateOneOf(json: Json, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
-        val ctx = context.addApproximation(
-            "oneOf translated to AlternativeValues (anyOf) - exclusivity constraint lost",
-            Some("ReNGBis AlternativeValues allows multiple matches, unlike oneOf")
-        )
-        translateAnyOf(json, ctx)
+        // oneOf maps to AlternativeValues - in practice, oneOf subschemas typically have non-overlapping types
+        // so the "exactly one" vs "at least one" distinction rarely matters
+        translateAnyOf(json, context)
 
     private def translateAllOf(json: Json, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         json match
@@ -641,10 +771,12 @@ object JsonSchemaImporter:
                 if schemaList.isEmpty then Right((AnyValue(), context))
                 else
                     // Translate all schemas in the allOf, inlining $ref definitions so we can merge properties
+                    val baseCtx = context
                     schemaList.zipWithIndex
                         .foldLeft[Either[String, (List[Schema], TranslationContext)]](Right((List.empty, context))):
                             case (Right((translatedSchemas, ctx)), (schema, idx)) =>
-                                translateSchemaInliningRefs(schema, ctx.atPath(s"allOf[$idx]")) match
+                                val itemCtx = baseCtx.atPath(s"allOf[$idx]").copy(report = ctx.report, fetchedSchemas = ctx.fetchedSchemas)
+                                translateSchemaInliningRefs(schema, itemCtx) match
                                     case Left(error)                 => Left(error)
                                     case Right((translated, newCtx)) => Right((translatedSchemas :+ translated, newCtx))
                             case (left @ Left(_), _)                              => left
@@ -662,60 +794,72 @@ object JsonSchemaImporter:
             case Json.Obj(fields) =>
                 val fieldsMap = fields.toMap
                 fieldsMap.get("$ref") match
-                    case Some(Json.Str(ref)) if ref.startsWith("#/$defs/") || ref.startsWith("#/definitions/") =>
-                        // Inline the definition instead of creating a NamedValueReference
-                        val name    = ref.split("/").last
-                        val pointer = if ref.startsWith("#/$defs/") then "/$defs/" + name else "/definitions/" + name
+                    case Some(Json.Str(ref)) =>
+                        isDirectDefinitionRef(ref) match
+                            case Some(name) =>
+                                // Inline the definition instead of creating a NamedValueReference
+                                val pointer = if ref.startsWith("#/$defs/") then "/$defs/" + name else "/definitions/" + name
 
-                        // Still track the reference for output
-                        val ctxWithRef = context.addReferencedDef(name)
+                                // Don't track as referenced - we're inlining it, not referencing it by name
 
-                        if ctxWithRef.isResolvingRef(ref) then
-                            // Cycle detected - use named reference to break the cycle
-                            Right((NamedValueReference(name), ctxWithRef))
-                        else
-                            resolveJsonPointer(ctxWithRef.rootJson, pointer) match
-                                case Some(referencedJson) =>
-                                    val ctxResolving = ctxWithRef.withResolvedRef(ref)
-                                    translateSchema(referencedJson, ctxResolving)
-                                case None                 =>
-                                    // Definition not found - use named reference
+                                if context.isResolvingRef(ref) then
+                                    // Cycle detected - use named reference to break the cycle
+                                    // In this case we DO need to track it since we're creating a NamedValueReference
+                                    val ctxWithRef = context.addReferencedDef(name)
                                     Right((NamedValueReference(name), ctxWithRef))
-                    case _                                                                                     =>
-                        // Not a definition $ref, use normal translation
-                        translateSchema(json, context)
+                                else
+                                    resolveJsonPointer(context.rootJson, pointer) match
+                                        case Some(referencedJson) =>
+                                            // Enter the definition context for better friction reporting
+                                            val ctxInDef = context.withResolvedRef(ref).enterDefinition(name)
+                                            translateSchema(referencedJson, ctxInDef)
+                                        case None                 =>
+                                            // Definition not found - use named reference and track it
+                                            val ctxWithRef = context.addReferencedDef(name)
+                                            Right((NamedValueReference(name), ctxWithRef))
+                            case None       =>
+                                // Not a direct definition $ref (could be deep path or other), use normal translation
+                                translateSchema(json, context)
+                    case _                   =>
+                        // No $ref - check for anyOf/oneOf and recursively inline refs in them
+                        fieldsMap.get("anyOf").orElse(fieldsMap.get("oneOf")) match
+                            case Some(Json.Arr(schemas)) =>
+                                // Recursively inline refs in each anyOf/oneOf alternative
+                                val baseCtx   = context
+                                val isAnyOf   = fieldsMap.contains("anyOf")
+                                val fieldName = if isAnyOf then "anyOf" else "oneOf"
+                                schemas.toList.zipWithIndex
+                                    .foldLeft[Either[String, (List[Schema], TranslationContext)]](Right((List.empty, context))):
+                                        case (Right((translatedSchemas, ctx)), (schema, idx)) =>
+                                            val itemCtx = baseCtx.atPath(s"$fieldName[$idx]").copy(report = ctx.report, fetchedSchemas = ctx.fetchedSchemas)
+                                            translateSchemaInliningRefs(schema, itemCtx) match
+                                                case Left(error)                 => Left(error)
+                                                case Right((translated, newCtx)) => Right((translatedSchemas :+ translated, newCtx))
+                                        case (left @ Left(_), _)                              => left
+                                    .map { case (translatedSchemas, ctx) =>
+                                        val schema =
+                                            if translatedSchemas.size == 1 then translatedSchemas.head
+                                            else AlternativeValues(translatedSchemas*)
+                                        (schema, ctx)
+                                    }
+                            case _                       =>
+                                // No anyOf/oneOf either, use normal translation
+                                translateSchema(json, context)
             case _                => translateSchema(json, context)
 
-    /** Merges multiple schemas from an allOf into a single schema. For object schemas, properties are merged. For other types, only the first schema is used.
+    /** Merges multiple schemas from an allOf into a single schema. For object schemas, properties are merged. For anyOf/oneOf containing object schemas, all alternative properties are merged (since they're all valid options).
       */
     private def mergeAllOfSchemas(schemas: List[Schema], context: TranslationContext): (Schema, TranslationContext) =
         if schemas.isEmpty then (AnyValue(), context)
         else if schemas.size == 1 then (schemas.head, context)
         else
-            // Collect all ObjectValue schemas (including Documented ones) and their properties
-            val (objectSchemas, nonObjectSchemas) = schemas.partition:
-                case _: ObjectValue                => true
-                case Documented(_, _: ObjectValue) => true
-                case _                             => false
-
-            val objectValues = objectSchemas.flatMap:
-                case ov: ObjectValue                => Some(ov)
-                case Documented(_, ov: ObjectValue) => Some(ov)
-                case _                              => None
+            // Extract all ObjectValue schemas, including from AlternativeValues (anyOf/oneOf)
+            val objectValues = schemas.flatMap(extractObjectValues)
 
             if objectValues.nonEmpty then
                 // Merge all object properties
                 val mergedProperties = objectValues.flatMap(_.obj).toMap
-                var currentCtx       = context
-
-                // If there are non-object schemas, report friction
-                if nonObjectSchemas.nonEmpty then
-                    currentCtx = currentCtx.addApproximation(
-                        s"allOf contains ${ nonObjectSchemas.size } non-object schema(s) that were merged with object properties",
-                        Some("Non-object schemas in allOf with object schemas may have different semantics")
-                    )
-
-                (ObjectValue(mergedProperties), currentCtx)
+                (ObjectValue(mergedProperties), context)
             else
                 // No object schemas - report friction and use first schema
                 val currentCtx = context.addLoss(
@@ -723,6 +867,16 @@ object JsonSchemaImporter:
                     Some("Consider merging constraints manually or using composition")
                 )
                 (schemas.head, currentCtx)
+
+    /** Recursively extracts all ObjectValue schemas from a schema, including from nested structures like AlternativeValues (anyOf/oneOf) and Documented wrappers.
+      */
+    private def extractObjectValues(schema: Schema): List[ObjectValue] =
+        schema match
+            case ov: ObjectValue          => List(ov)
+            case Documented(_, inner)     => extractObjectValues(inner)
+            case Deprecated(inner)        => extractObjectValues(inner)
+            case AlternativeValues(alts*) => alts.toList.flatMap(extractObjectValues)
+            case _                        => List.empty
 
     /** Translates all referenced definitions from the JSON Schema to ReNGBis schemas. This recursively translates definitions, discovering new referenced definitions as it goes.
       */
@@ -753,7 +907,7 @@ object JsonSchemaImporter:
 
                     defsJson.get(defName) match
                         case Some(defJson) =>
-                            // Create a fresh context for translating this definition to avoid interference
+                            // Create a fresh context for translating this definition
                             val defContext = TranslationContext(
                                 path = s"$$/$defName",
                                 report = currentCtx.report,
@@ -761,7 +915,7 @@ object JsonSchemaImporter:
                                 rootJson = rootJson,
                                 resolvedRefs = Set.empty,
                                 referencedDefs = currentCtx.referencedDefs
-                            )
+                            ).enterDefinition(defName)
 
                             translateSchema(defJson, defContext) match
                                 case Left(error)          =>

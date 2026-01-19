@@ -23,7 +23,7 @@ object Main extends ZIOCliDefault:
     enum RengbisCommand:
         case ValidateSchema(schemaFiles: List[Path])
         case ValidateData(format: Format, schemaFile: Path, schema: Option[String], dataFiles: List[Path])
-        case TranslateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], report: Option[Path], style: OutputStyle)
+        case TranslateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], report: Option[Path], style: OutputStyle, fetchExternal: Boolean)
         case TranslateSchemaTo(format: SchemaFormat, source: Path, target: Option[Path], report: Option[Path], rootName: Option[String])
 
     val formatOption: Options[Format] =
@@ -84,6 +84,11 @@ object Main extends ZIOCliDefault:
             )
             .withDefault(OutputStyle.Pretty) ?? "Output style: compact (single line), pretty (formatted), expanded (fully expanded)"
 
+    val fetchExternalOption: Options[Boolean] =
+        Options
+            .boolean("fetch-external")
+            .withDefault(false) ?? "Enable fetching external URL references in JSON Schema (requires network access)"
+
     def filesArg(exists: Exists = Exists.Yes): Args[List[Path]] =
         Args.file("files", exists).+ ?? "One or more files to validate"
 
@@ -112,10 +117,10 @@ object Main extends ZIOCliDefault:
             }
 
     def translateSchemaFromCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
-        Command("translate-schema-from", schemaFormatOption ++ sourceFileOption(exists) ++ targetFileOption ++ reportFileOption ++ outputStyleOption)
+        Command("translate-schema-from", schemaFormatOption ++ sourceFileOption(exists) ++ targetFileOption ++ reportFileOption ++ outputStyleOption ++ fetchExternalOption)
             .withHelp(translateSchemaFromHelp)
-            .map { case (format, source, target, report, style) =>
-                RengbisCommand.TranslateSchemaFrom(format, source, target, report, style)
+            .map { case (format, source, target, report, style, fetchExternal) =>
+                RengbisCommand.TranslateSchemaFrom(format, source, target, report, style, fetchExternal)
             }
 
     def translateSchemaToCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
@@ -146,10 +151,10 @@ object Main extends ZIOCliDefault:
 
     def execute(cmd: RengbisCommand): ZIO[Any, Throwable, Unit] =
         cmd match
-            case RengbisCommand.ValidateSchema(schemaFiles)                                 => validateSchemas(schemaFiles)
-            case RengbisCommand.ValidateData(format, schemaFile, schema, dataFiles)         => validateData(format, schemaFile, schema, dataFiles)
-            case RengbisCommand.TranslateSchemaFrom(format, source, target, report, style)  => translateSchemaFrom(format, source, target, report, style)
-            case RengbisCommand.TranslateSchemaTo(format, source, target, report, rootName) => translateSchemaTo(format, source, target, report, rootName)
+            case RengbisCommand.ValidateSchema(schemaFiles)                                               => validateSchemas(schemaFiles)
+            case RengbisCommand.ValidateData(format, schemaFile, schema, dataFiles)                       => validateData(format, schemaFile, schema, dataFiles)
+            case RengbisCommand.TranslateSchemaFrom(format, source, target, report, style, fetchExternal) => translateSchemaFrom(format, source, target, report, style, fetchExternal)
+            case RengbisCommand.TranslateSchemaTo(format, source, target, report, rootName)               => translateSchemaTo(format, source, target, report, rootName)
 
     def validateSchemas(paths: List[Path]): ZIO[Any, Throwable, Unit] =
         ZIO.foreach(paths) { path =>
@@ -193,16 +198,19 @@ object Main extends ZIOCliDefault:
             _                               <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
         yield ()
 
-    def translateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], reportPath: Option[Path], style: OutputStyle): ZIO[Any, Throwable, Unit] =
+    def translateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], reportPath: Option[Path], style: OutputStyle, fetchExternal: Boolean): ZIO[Any, Throwable, Unit] =
         import rengbis.translators.schemas.xsd.{ XsdImporter, XsdExporter }
         import rengbis.translators.schemas.jsonschema.{ JsonSchemaImporter, JsonSchemaExporter }
         import rengbis.translators.schemas.avro.{ AvroImporter, AvroExporter }
-        import rengbis.translators.common.FrictionReport
+        import rengbis.translators.common.{ FrictionReport, SchemaFetcher }
 
         val printConfig = style match
             case OutputStyle.Compact  => PrintConfig.compact
             case OutputStyle.Pretty   => PrintConfig.pretty
             case OutputStyle.Expanded => PrintConfig.expanded
+
+        // Use HTTP fetcher only if --fetch-external flag is set
+        val fetcher: SchemaFetcher = if fetchExternal then HttpSchemaFetcher else SchemaFetcher.NoOp
 
         for
             sourceContent <- ZIO.attempt(Files.readString(source))
@@ -210,8 +218,12 @@ object Main extends ZIOCliDefault:
                                  case SchemaFormat.JsonSchema =>
                                      // Use the new method that returns definitions
                                      for
-                                         importResult <- ZIO.fromEither(JsonSchemaImporter.fromJsonSchemaWithDefinitions(sourceContent))
+                                         importResult <- ZIO.fromEither(JsonSchemaImporter.fromJsonSchemaWithDefinitions(sourceContent, fetcher))
                                                              .mapError(e => new RuntimeException(s"Failed to import schema: $e"))
+                                         // Log fetched external URLs
+                                         _            <- ZIO.foreach(importResult.fetchedUrls.toList.sorted) { url =>
+                                                             Console.printLine(s"Fetched external schema: $url")
+                                                         }
                                          output        = SchemaPrinter.printWithDefinitions(importResult.root, importResult.definitions, printConfig)
                                          _            <- reportPath match
                                                              case Some(path) =>

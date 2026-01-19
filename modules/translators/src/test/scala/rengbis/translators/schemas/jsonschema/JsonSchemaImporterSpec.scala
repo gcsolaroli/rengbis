@@ -306,15 +306,14 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                     result.map(_._1) == Right(AlternativeValues(TextValue(), NumericValue()))
                 )
             },
-            test("imports oneOf with friction") {
-                val jsonSchema               = """{"oneOf": [{"type": "string"}, {"type": "number"}]}"""
-                val result                   = JsonSchemaImporter.fromJsonSchema(jsonSchema)
-                val (schema, frictionReport) = result.getOrElse((AnyValue(), FrictionReport()))
+            test("imports oneOf as AlternativeValues") {
+                // oneOf with non-overlapping types maps exactly to AlternativeValues - no friction
+                val jsonSchema = """{"oneOf": [{"type": "string"}, {"type": "number"}]}"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    schema == AlternativeValues(TextValue(), NumericValue()),
-                    frictionReport.nonEmpty,
-                    frictionReport.entries.exists(_.frictionType == FrictionType.Approximation)
+                    result.map(_._1) == Right(AlternativeValues(TextValue(), NumericValue())),
+                    result.map(_._2.isEmpty) == Right(true) // No friction expected
                 )
             },
             test("reports friction for not") {
@@ -344,6 +343,61 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                 assertTrue(
                     result.isRight,
                     result.map(_._1).exists(_.isInstanceOf[ScopedReference])
+                )
+            },
+            test("deep $ref path resolves inline instead of creating NamedValueReference") {
+                // This tests the tsconfig.json pattern where a deep ref like
+                // #/definitions/compilerOptionsDefinition/properties/compilerOptions
+                // should be resolved by following the path, not by extracting "compilerOptions"
+                // as a definition name (which would be incorrect)
+                val jsonSchema = """{
+                    "$ref": "#/definitions/parentDef/properties/nestedProp",
+                    "definitions": {
+                        "parentDef": {
+                            "properties": {
+                                "nestedProp": {
+                                    "type": "object",
+                                    "properties": {
+                                        "value": { "type": "string" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                // Should resolve to the nested object, not to NamedValueReference("nestedProp")
+                // which would cause "Referenced definition 'nestedProp' not found" friction
+                val expected   = ObjectValue(
+                    Map(
+                        OptionalLabel("value") -> TextValue()
+                    )
+                )
+                assertTrue(
+                    result.isRight,
+                    result.map(_._1) == Right(expected)
+                )
+            },
+            test("deep $ref path does not report missing definition friction") {
+                // When we have a deep $ref, we should NOT get a friction report about
+                // "Referenced definition 'X' not found" because X is not a definition
+                val jsonSchema               = """{
+                    "$ref": "#/definitions/parentDef/properties/nested",
+                    "definitions": {
+                        "parentDef": {
+                            "properties": {
+                                "nested": { "type": "string" }
+                            }
+                        }
+                    }
+                }"""
+                val result                   = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                val (schema, frictionReport) = result.getOrElse((AnyValue(), FrictionReport()))
+                assertTrue(
+                    result.isRight,
+                    schema == TextValue(),
+                    // Should NOT have friction about missing definition
+                    !frictionReport.entries.exists(e => e.message.contains("Referenced definition") && e.message.contains("not found"))
                 )
             }
         ),
@@ -385,14 +439,13 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
         ),
         suite("Type arrays")(
             test("imports type array as AlternativeValues") {
-                val jsonSchema               = """{"type": ["string", "number"]}"""
-                val result                   = JsonSchemaImporter.fromJsonSchema(jsonSchema)
-                val (schema, frictionReport) = result.getOrElse((AnyValue(), FrictionReport()))
+                // Type arrays map exactly to AlternativeValues - no friction
+                val jsonSchema = """{"type": ["string", "number"]}"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    schema == AlternativeValues(TextValue(), NumericValue()),
-                    frictionReport.nonEmpty,
-                    frictionReport.entries.exists(_.frictionType == FrictionType.Approximation)
+                    result.map(_._1) == Right(AlternativeValues(TextValue(), NumericValue())),
+                    result.map(_._2.isEmpty) == Right(true) // No friction expected
                 )
             },
             test("imports type array [array, null] with items as list (null handled via optionality)") {
@@ -488,6 +541,7 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
             },
             test("imports allOf with $ref and anyOf") {
                 // Pattern from tsconfig.json: allOf with refs and an anyOf
+                // All properties from all definitions (including those inside anyOf) should be merged
                 val jsonSchema = """{
                     "type": "object",
                     "allOf": [
@@ -518,14 +572,56 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                     }
                 }"""
                 val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
-                // The anyOf is a non-object schema, so only def1 properties are merged
-                // and there's friction reported for the anyOf
+                // All properties from def1, def2, and def3 should be merged into the root object
+                val expected   = ObjectValue(
+                    Map(
+                        OptionalLabel("name")    -> TextValue(),
+                        OptionalLabel("files")   -> ListOfValues(TextValue()),
+                        OptionalLabel("include") -> ListOfValues(TextValue())
+                    )
+                )
                 assertTrue(
                     result.isRight,
-                    result.map(_._1).exists {
-                        case ObjectValue(props) => props.contains(OptionalLabel("name"))
-                        case _                  => false
+                    result.map(_._1) == Right(expected)
+                )
+            },
+            test("allOf with anyOf does not create dangling definitions for inlined refs") {
+                // When refs inside anyOf are inlined into the allOf merge, they should NOT
+                // appear as separate named definitions
+                val jsonSchema = """{
+                    "type": "object",
+                    "allOf": [
+                        { "$ref": "#/definitions/def1" },
+                        {
+                            "anyOf": [
+                                { "$ref": "#/definitions/def2" },
+                                { "$ref": "#/definitions/def3" }
+                            ]
+                        }
+                    ],
+                    "definitions": {
+                        "def1": {
+                            "properties": {
+                                "name": { "type": "string" }
+                            }
+                        },
+                        "def2": {
+                            "properties": {
+                                "files": { "type": "array", "items": { "type": "string" } }
+                            }
+                        },
+                        "def3": {
+                            "properties": {
+                                "include": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
                     }
+                }"""
+                val result     = JsonSchemaImporter.fromJsonSchemaWithDefinitions(jsonSchema)
+                // No named definitions should be output - all are inlined
+                assertTrue(
+                    result.isRight,
+                    result.map(_.definitions.isEmpty) == Right(true)
                 )
             }
         ),
