@@ -358,14 +358,12 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                     schema.asInstanceOf[Documented].doc == Some("An object")
                 )
             },
-            test("description on non-object type is lost as friction") {
-                val jsonSchema               = """{"type": "string", "description": "A text field"}"""
-                val result                   = JsonSchemaImporter.fromJsonSchema(jsonSchema)
-                val (schema, frictionReport) = result.getOrElse((AnyValue(), FrictionReport()))
+            test("description on non-object type is preserved") {
+                val jsonSchema = """{"type": "string", "description": "A text field"}"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    schema == TextValue(),
-                    frictionReport.entries.exists(e => e.frictionType == FrictionType.Loss && e.message.contains("description on non-object"))
+                    result.map(_._1) == Right(Documented(Some("A text field"), TextValue()))
                 )
             },
             test("imports deprecated") {
@@ -376,14 +374,12 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                     result.map(_._1) == Right(Deprecated(TextValue()))
                 )
             },
-            test("imports both deprecated and description (description lost on non-object)") {
-                val jsonSchema               = """{"type": "string", "description": "Old field", "deprecated": true}"""
-                val result                   = JsonSchemaImporter.fromJsonSchema(jsonSchema)
-                val (schema, frictionReport) = result.getOrElse((AnyValue(), FrictionReport()))
+            test("imports both deprecated and description") {
+                val jsonSchema = """{"type": "string", "description": "Old field", "deprecated": true}"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
                 assertTrue(
                     result.isRight,
-                    schema == Deprecated(TextValue()),
-                    frictionReport.entries.exists(e => e.frictionType == FrictionType.Loss && e.message.contains("description on non-object"))
+                    result.map(_._1) == Right(Deprecated(Documented(Some("Old field"), TextValue())))
                 )
             }
         ),
@@ -397,6 +393,139 @@ object JsonSchemaImporterSpec extends ZIOSpecDefault:
                     schema == AlternativeValues(TextValue(), NumericValue()),
                     frictionReport.nonEmpty,
                     frictionReport.entries.exists(_.frictionType == FrictionType.Approximation)
+                )
+            },
+            test("imports type array [array, null] with items as list (null handled via optionality)") {
+                // This is the filesDefinition case from tsconfig.json
+                val jsonSchema = """{
+                    "type": ["array", "null"],
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "string"
+                    }
+                }"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                val expected   = ListOfValues(TextValue(), ListConstraint.Constraints(unique = Seq(ListConstraint.Uniqueness.Simple)))
+                assertTrue(
+                    result.isRight,
+                    result.map(_._1) == Right(expected)
+                )
+            },
+            test("imports type array [array, null] preserves items constraint") {
+                val jsonSchema = """{
+                    "type": ["array", "null"],
+                    "items": {
+                        "type": "number"
+                    }
+                }"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                assertTrue(
+                    result.isRight,
+                    result.map(_._1) == Right(ListOfValues(NumericValue()))
+                )
+            },
+            test("imports single non-null type from array without AlternativeValues wrapper") {
+                // When type array has only one non-null type, don't wrap in AlternativeValues
+                val jsonSchema = """{"type": ["string", "null"]}"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                assertTrue(
+                    result.isRight,
+                    result.map(_._1) == Right(TextValue())
+                )
+            }
+        ),
+        suite("Type arrays with description")(
+            test("imports type array with description preserves documentation") {
+                // The filesDefinition case: description should be preserved on the array type
+                val jsonSchema = """{
+                    "description": "List of files to include",
+                    "type": ["array", "null"],
+                    "items": {
+                        "type": "string"
+                    }
+                }"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                val expected   = Documented(Some("List of files to include"), ListOfValues(TextValue()))
+                assertTrue(
+                    result.isRight,
+                    result.map(_._1) == Right(expected)
+                )
+            }
+        ),
+        suite("allOf with multiple $ref")(
+            test("imports allOf with multiple $ref by merging inlined definitions") {
+                // Simplified version of tsconfig.json pattern
+                val jsonSchema = """{
+                    "type": "object",
+                    "allOf": [
+                        { "$ref": "#/definitions/def1" },
+                        { "$ref": "#/definitions/def2" }
+                    ],
+                    "definitions": {
+                        "def1": {
+                            "properties": {
+                                "name": { "type": "string" }
+                            }
+                        },
+                        "def2": {
+                            "properties": {
+                                "age": { "type": "number" }
+                            }
+                        }
+                    }
+                }"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                val expected   = ObjectValue(
+                    Map(
+                        OptionalLabel("name") -> TextValue(),
+                        OptionalLabel("age")  -> NumericValue()
+                    )
+                )
+                assertTrue(
+                    result.isRight,
+                    result.map(_._1) == Right(expected)
+                )
+            },
+            test("imports allOf with $ref and anyOf") {
+                // Pattern from tsconfig.json: allOf with refs and an anyOf
+                val jsonSchema = """{
+                    "type": "object",
+                    "allOf": [
+                        { "$ref": "#/definitions/def1" },
+                        {
+                            "anyOf": [
+                                { "$ref": "#/definitions/def2" },
+                                { "$ref": "#/definitions/def3" }
+                            ]
+                        }
+                    ],
+                    "definitions": {
+                        "def1": {
+                            "properties": {
+                                "name": { "type": "string" }
+                            }
+                        },
+                        "def2": {
+                            "properties": {
+                                "files": { "type": "array", "items": { "type": "string" } }
+                            }
+                        },
+                        "def3": {
+                            "properties": {
+                                "include": { "type": "array", "items": { "type": "string" } }
+                            }
+                        }
+                    }
+                }"""
+                val result     = JsonSchemaImporter.fromJsonSchema(jsonSchema)
+                // The anyOf is a non-object schema, so only def1 properties are merged
+                // and there's friction reported for the anyOf
+                assertTrue(
+                    result.isRight,
+                    result.map(_._1).exists {
+                        case ObjectValue(props) => props.contains(OptionalLabel("name"))
+                        case _                  => false
+                    }
                 )
             }
         ),

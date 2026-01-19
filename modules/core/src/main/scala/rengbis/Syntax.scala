@@ -119,8 +119,18 @@ object SchemaSyntax:
             )
     )
 
-    val anyValue: SchemaSyntax[Schema.AnyValue]             = Syntax.string("any", Schema.AnyValue())
-    val booleanValue: SchemaSyntax[Schema.BooleanValue]     = Syntax.string("boolean", Schema.BooleanValue())
+    val anyValue: SchemaSyntax[Schema.AnyValue] = Syntax.string("any", Schema.AnyValue())
+
+    val booleanDefaultValue: SchemaSyntax[Boolean] = whitespaces ~ Syntax.string("?=", ()) ~ whitespaces ~> (
+        Syntax.string("true", true) <> Syntax.string("false", false)
+    )
+
+    val booleanValue: SchemaSyntax[Schema.BooleanValue] = (
+        Syntax.string("boolean", ()) ~ booleanDefaultValue.optional
+    ).transform(
+        { case default => Schema.BooleanValue(default) },
+        bv => bv.default
+    )
     val givenTextValue: SchemaSyntax[Schema.GivenTextValue] = quotedString.transform(s => Schema.GivenTextValue(s), v => v.value)
 
     val decimalNumber: SchemaSyntax[BigDecimal] = (

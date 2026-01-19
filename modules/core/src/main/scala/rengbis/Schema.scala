@@ -167,9 +167,9 @@ object Schema:
             schema.replaceReferencedValues(context*).map(s => Deprecated(s))
         override def dependencies: Seq[String]                                                   = schema.dependencies
 
-    final case class Fail()         extends Schema
-    final case class AnyValue()     extends Schema
-    final case class BooleanValue() extends Schema
+    final case class Fail()                                        extends Schema
+    final case class AnyValue()                                    extends Schema
+    final case class BooleanValue(default: Option[Boolean] = None) extends Schema
 
     final case class TextValue(constraints: TextConstraint.Constraints = TextConstraint.Constraints.empty, default: Option[String] = None) extends Schema
     object TextValue:

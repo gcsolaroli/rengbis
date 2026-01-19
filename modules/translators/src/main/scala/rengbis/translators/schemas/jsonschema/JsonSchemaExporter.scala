@@ -65,8 +65,12 @@ object JsonSchemaExporter:
             case TimeValue(constraints @ _*) =>
                 translateTimeValue(constraints, context)
 
-            case BooleanValue() =>
-                (Json.Obj("type" -> Json.Str("boolean")), context.report)
+            case BooleanValue(default) =>
+                val base        = Json.Obj("type" -> Json.Str("boolean"))
+                val withDefault = default match
+                    case Some(d) => Json.Obj((base.fields ++ Seq("default" -> Json.Bool(d)))*)
+                    case None    => base
+                (withDefault, context.report)
 
             case AnyValue() =>
                 (Json.Obj(), context.report) // Empty schema means "anything"

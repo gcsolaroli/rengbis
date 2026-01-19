@@ -122,7 +122,7 @@ object XsdExporter:
             case TimeValue(constraints @ _*) =>
                 translateTimeValue(constraints, context)
 
-            case BooleanValue() =>
+            case BooleanValue(_) =>
                 val restriction = elem("restriction", attr("base", "xs:boolean"))
                 (Seq(restriction), context)
 

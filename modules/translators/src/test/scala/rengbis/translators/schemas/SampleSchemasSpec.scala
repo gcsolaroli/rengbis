@@ -82,44 +82,44 @@ object SampleSchemasSpec extends ZIOSpecDefault:
                 println(s"ERROR importing $name: $error")
                 assertTrue(false)
             case Right((schema, friction)) =>
-                println(s"\n${ "=" * 70 }")
-                println(s"=== $name ===")
-                println(s"${ "=" * 70 }")
+                // println(s"\n${ "=" * 70 }")
+                // println(s"=== $name ===")
+                // println(s"${ "=" * 70 }")
 
-                // Group friction by type
-                val byType = friction.entries.groupBy(_.frictionType)
+                // // Group friction by type
+                // val byType = friction.entries.groupBy(_.frictionType)
 
-                println(s"\nTotal friction entries: ${ friction.entries.size }")
+                // println(s"\nTotal friction entries: ${ friction.entries.size }")
 
-                byType.foreach { case (frictionType, entries) =>
-                    println(s"\n--- ${ frictionType } (${ entries.size } issues) ---")
-                    // Group by message to see patterns
-                    val byMessage = entries.groupBy(_.message).toSeq.sortBy(-_._2.size)
-                    byMessage.foreach { case (msg, es) =>
-                        println(s"  [${ es.size }x] $msg")
-                        if es.size <= 3 then es.foreach(e => println(s"       at: ${ e.path.take(80) }..."))
-                    }
-                }
+                // byType.foreach { case (frictionType, entries) =>
+                //     println(s"\n--- ${ frictionType } (${ entries.size } issues) ---")
+                //     // Group by message to see patterns
+                //     val byMessage = entries.groupBy(_.message).toSeq.sortBy(-_._2.size)
+                //     byMessage.foreach { case (msg, es) =>
+                //         println(s"  [${ es.size }x] $msg")
+                //         if es.size <= 3 then es.foreach(e => println(s"       at: ${ e.path.take(80) }..."))
+                //     }
+                // }
 
-                // First check for problematic schemas before printing
-                findFirstUnprintable(schema) match
-                    case Some((badPath, badSchema, err)) =>
-                        println(s"\nSchema print result: FAILED (pre-check)")
-                        println(s"  First unprintable at: $badPath")
-                        println(s"    Error: $err")
-                        println(s"    Schema type: ${ badSchema.getClass.getSimpleName }")
-                        println(s"    Schema: ${ badSchema.toString.take(200) }")
-                    case None                            =>
-                        val printed =
-                            try printSchema(schema)
-                            catch case e: Exception => s"<print exception: ${ e.getMessage }>"
-                        println(s"\nSchema print result: ${ if printed.startsWith("<print") then "FAILED" else s"OK (${ printed.length } chars)" }")
-                        if printed.startsWith("<print") then
-                            println(s"  Error: $printed")
-                            val types = findSchemaTypes(schema)
-                            println(s"  Schema types found: ${ types.size }")
-                            types.filter(_.startsWith("NamedValueReference")).foreach(t => println(s"    - $t"))
-                            types.filter(_.startsWith("ScopedReference")).foreach(t => println(s"    - $t"))
+                // // First check for problematic schemas before printing
+                // findFirstUnprintable(schema) match
+                //     case Some((badPath, badSchema, err)) =>
+                //         println(s"\nSchema print result: FAILED (pre-check)")
+                //         println(s"  First unprintable at: $badPath")
+                //         println(s"    Error: $err")
+                //         println(s"    Schema type: ${ badSchema.getClass.getSimpleName }")
+                //         println(s"    Schema: ${ badSchema.toString.take(200) }")
+                //     case None                            =>
+                //         val printed =
+                //             try printSchema(schema)
+                //             catch case e: Exception => s"<print exception: ${ e.getMessage }>"
+                //         println(s"\nSchema print result: ${ if printed.startsWith("<print") then "FAILED" else s"OK (${ printed.length } chars)" }")
+                //         if printed.startsWith("<print") then
+                //             println(s"  Error: $printed")
+                //             val types = findSchemaTypes(schema)
+                //             println(s"  Schema types found: ${ types.size }")
+                //             types.filter(_.startsWith("NamedValueReference")).foreach(t => println(s"    - $t"))
+                //             types.filter(_.startsWith("ScopedReference")).foreach(t => println(s"    - $t"))
 
                 assertTrue(true)
 
@@ -132,14 +132,14 @@ object SampleSchemasSpec extends ZIOSpecDefault:
                 println(s"ERROR importing $name: $error")
                 assertTrue(false)
             case Right((schema, friction)) =>
-                println(s"\n=== $name ===")
-                println(s"Friction: ${ friction.entries.size } issues")
-                friction.entries.take(5).foreach(e => println(s"  - [${ e.path }] ${ e.message }"))
-                if friction.entries.size > 5 then println(s"  ... and ${ friction.entries.size - 5 } more")
-                val printed = printSchema(schema)
-                println(s"Schema (${ printed.length } chars):")
-                println(printed.take(300))
-                if printed.length > 300 then println("...")
+                // println(s"\n=== $name ===")
+                // println(s"Friction: ${ friction.entries.size } issues")
+                // friction.entries.take(5).foreach(e => println(s"  - [${ e.path }] ${ e.message }"))
+                // if friction.entries.size > 5 then println(s"  ... and ${ friction.entries.size - 5 } more")
+                // val printed = printSchema(schema)
+                // println(s"Schema (${ printed.length } chars):")
+                // println(printed.take(300))
+                // if printed.length > 300 then println("...")
                 assertTrue(true)
 
     def testXsdImport(name: String) = test(s"imports $name"):
@@ -151,14 +151,14 @@ object SampleSchemasSpec extends ZIOSpecDefault:
                 println(s"ERROR importing $name: $error")
                 assertTrue(false)
             case Right((schema, friction)) =>
-                println(s"\n=== $name ===")
-                println(s"Friction: ${ friction.entries.size } issues")
-                friction.entries.take(5).foreach(e => println(s"  - [${ e.path }] ${ e.message }"))
-                if friction.entries.size > 5 then println(s"  ... and ${ friction.entries.size - 5 } more")
-                val printed = printSchema(schema)
-                println(s"Schema (${ printed.length } chars):")
-                println(printed.take(300))
-                if printed.length > 300 then println("...")
+                // println(s"\n=== $name ===")
+                // println(s"Friction: ${ friction.entries.size } issues")
+                // friction.entries.take(5).foreach(e => println(s"  - [${ e.path }] ${ e.message }"))
+                // if friction.entries.size > 5 then println(s"  ... and ${ friction.entries.size - 5 } more")
+                // val printed = printSchema(schema)
+                // println(s"Schema (${ printed.length } chars):")
+                // println(printed.take(300))
+                // if printed.length > 300 then println("...")
                 assertTrue(true)
 
     def testSimplePrint = test("simple print test"):

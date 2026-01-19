@@ -1,6 +1,6 @@
 package rengbis.cli
 
-import rengbis.{ DataParsers, SchemaLoader, SchemaSyntax, Validator }
+import rengbis.{ DataParsers, PrintConfig, SchemaLoader, SchemaPrinter, SchemaSyntax, Validator }
 import zio.cli.HelpDoc.Span.text
 
 import java.nio.file.{ Files, Path, Paths }
@@ -17,10 +17,13 @@ object Main extends ZIOCliDefault:
     enum SchemaFormat:
         case Xsd, JsonSchema, Avro
 
+    enum OutputStyle:
+        case Compact, Pretty, Expanded
+
     enum RengbisCommand:
         case ValidateSchema(schemaFiles: List[Path])
         case ValidateData(format: Format, schemaFile: Path, schema: Option[String], dataFiles: List[Path])
-        case TranslateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], report: Option[Path])
+        case TranslateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], report: Option[Path], style: OutputStyle)
         case TranslateSchemaTo(format: SchemaFormat, source: Path, target: Option[Path], report: Option[Path], rootName: Option[String])
 
     val formatOption: Options[Format] =
@@ -72,6 +75,15 @@ object Main extends ZIOCliDefault:
             .text("root-name")
             .optional ?? "Root element name for XSD export (default: 'root')"
 
+    val outputStyleOption: Options[OutputStyle] =
+        Options
+            .enumeration[OutputStyle]("style")(
+                "compact"  -> OutputStyle.Compact,
+                "pretty"   -> OutputStyle.Pretty,
+                "expanded" -> OutputStyle.Expanded
+            )
+            .withDefault(OutputStyle.Pretty) ?? "Output style: compact (single line), pretty (formatted), expanded (fully expanded)"
+
     def filesArg(exists: Exists = Exists.Yes): Args[List[Path]] =
         Args.file("files", exists).+ ?? "One or more files to validate"
 
@@ -100,10 +112,10 @@ object Main extends ZIOCliDefault:
             }
 
     def translateSchemaFromCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
-        Command("translate-schema-from", schemaFormatOption ++ sourceFileOption(exists) ++ targetFileOption ++ reportFileOption)
+        Command("translate-schema-from", schemaFormatOption ++ sourceFileOption(exists) ++ targetFileOption ++ reportFileOption ++ outputStyleOption)
             .withHelp(translateSchemaFromHelp)
-            .map { case (format, source, target, report) =>
-                RengbisCommand.TranslateSchemaFrom(format, source, target, report)
+            .map { case (format, source, target, report, style) =>
+                RengbisCommand.TranslateSchemaFrom(format, source, target, report, style)
             }
 
     def translateSchemaToCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
@@ -136,7 +148,7 @@ object Main extends ZIOCliDefault:
         cmd match
             case RengbisCommand.ValidateSchema(schemaFiles)                                 => validateSchemas(schemaFiles)
             case RengbisCommand.ValidateData(format, schemaFile, schema, dataFiles)         => validateData(format, schemaFile, schema, dataFiles)
-            case RengbisCommand.TranslateSchemaFrom(format, source, target, report)         => translateSchemaFrom(format, source, target, report)
+            case RengbisCommand.TranslateSchemaFrom(format, source, target, report, style)  => translateSchemaFrom(format, source, target, report, style)
             case RengbisCommand.TranslateSchemaTo(format, source, target, report, rootName) => translateSchemaTo(format, source, target, report, rootName)
 
     def validateSchemas(paths: List[Path]): ZIO[Any, Throwable, Unit] =
@@ -181,34 +193,57 @@ object Main extends ZIOCliDefault:
             _                               <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
         yield ()
 
-    def translateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], reportPath: Option[Path]): ZIO[Any, Throwable, Unit] =
+    def translateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], reportPath: Option[Path], style: OutputStyle): ZIO[Any, Throwable, Unit] =
         import rengbis.translators.schemas.xsd.{ XsdImporter, XsdExporter }
         import rengbis.translators.schemas.jsonschema.{ JsonSchemaImporter, JsonSchemaExporter }
         import rengbis.translators.schemas.avro.{ AvroImporter, AvroExporter }
         import rengbis.translators.common.FrictionReport
 
+        val printConfig = style match
+            case OutputStyle.Compact  => PrintConfig.compact
+            case OutputStyle.Pretty   => PrintConfig.pretty
+            case OutputStyle.Expanded => PrintConfig.expanded
+
         for
-            sourceContent           <- ZIO.attempt(Files.readString(source))
-            result                  <- ZIO.fromEither {
-                                           format match
-                                               case SchemaFormat.Xsd        => XsdImporter.fromXsd(sourceContent)
-                                               case SchemaFormat.JsonSchema => JsonSchemaImporter.fromJsonSchema(sourceContent)
-                                               case SchemaFormat.Avro       => AvroImporter.fromAvro(sourceContent)
-                                       }.mapError(e => new RuntimeException(s"Failed to import schema: $e"))
-            (schema, frictionReport) = result
-            output                  <- ZIO.fromEither(SchemaSyntax.items.printString(schema).left.map(e => new RuntimeException(s"Failed to serialize schema: $e")))
-            _                       <- target match
-                                           case Some(path) => ZIO.attempt(Files.writeString(path, s"= $output"))
-                                           case None       => Console.printLine(s"= $output")
-            _                       <- reportPath match
-                                           case Some(path) =>
-                                               val reportContent = if path.toString.endsWith(".md") then frictionReport.toMarkdown else frictionReport.toPlainText
-                                               ZIO.attempt(Files.writeString(path, reportContent)) *>
-                                                   Console.printLine(s"Friction report written to ${ path.getFileName }")
-                                           case None       => ZIO.unit
-            _                       <- target match
-                                           case Some(path) => Console.printLine(s"✓ Schema translated successfully to ${ path.getFileName }")
-                                           case None       => ZIO.unit
+            sourceContent <- ZIO.attempt(Files.readString(source))
+            output        <- format match
+                                 case SchemaFormat.JsonSchema =>
+                                     // Use the new method that returns definitions
+                                     for
+                                         importResult <- ZIO.fromEither(JsonSchemaImporter.fromJsonSchemaWithDefinitions(sourceContent))
+                                                             .mapError(e => new RuntimeException(s"Failed to import schema: $e"))
+                                         output        = SchemaPrinter.printWithDefinitions(importResult.root, importResult.definitions, printConfig)
+                                         _            <- reportPath match
+                                                             case Some(path) =>
+                                                                 val reportContent = if path.toString.endsWith(".md") then importResult.report.toMarkdown else importResult.report.toPlainText
+                                                                 ZIO.attempt(Files.writeString(path, reportContent)) *>
+                                                                     Console.printLine(s"Friction report written to ${ path.getFileName }")
+                                                             case None       => ZIO.unit
+                                     yield output
+                                 case _                       =>
+                                     // Other formats use the original method
+                                     for
+                                         result                  <- ZIO.fromEither {
+                                                                        format match
+                                                                            case SchemaFormat.Xsd  => XsdImporter.fromXsd(sourceContent)
+                                                                            case SchemaFormat.Avro => AvroImporter.fromAvro(sourceContent)
+                                                                            case _                 => Left("Unexpected format")
+                                                                    }.mapError(e => new RuntimeException(s"Failed to import schema: $e"))
+                                         (schema, frictionReport) = result
+                                         output                   = s"= ${ SchemaPrinter.print(schema, printConfig) }"
+                                         _                       <- reportPath match
+                                                                        case Some(path) =>
+                                                                            val reportContent = if path.toString.endsWith(".md") then frictionReport.toMarkdown else frictionReport.toPlainText
+                                                                            ZIO.attempt(Files.writeString(path, reportContent)) *>
+                                                                                Console.printLine(s"Friction report written to ${ path.getFileName }")
+                                                                        case None       => ZIO.unit
+                                     yield output
+            _             <- target match
+                                 case Some(path) => ZIO.attempt(Files.writeString(path, output))
+                                 case None       => Console.printLine(output)
+            _             <- target match
+                                 case Some(path) => Console.printLine(s"✓ Schema translated successfully to ${ path.getFileName }")
+                                 case None       => ZIO.unit
         yield ()
 
     def translateSchemaTo(format: SchemaFormat, source: Path, target: Option[Path], reportPath: Option[Path], rootName: Option[String]): ZIO[Any, Throwable, Unit] =

@@ -211,7 +211,7 @@ object Validator:
                 value match
                     case Value.TextValue(v) => Some(v)
                     case _                  => None
-            case BooleanValue()     =>
+            case BooleanValue(_)    =>
                 value match
                     case Value.BooleanValue(v) => Some(v)
                     case _                     => None
@@ -276,7 +276,7 @@ object Validator:
         case Deprecated(inner)              => validateValue(inner, value).withWarning(DeprecationWarning("Use of deprecated field"))
         case Fail()                         => ValidationResult.reportError(s"fail value")
         case AnyValue()                     => ValidationResult.valid
-        case BooleanValue()                 =>
+        case BooleanValue(_)                =>
             value match
                 case Value.BooleanValue(value) => ValidationResult.valid
                 case _                         => ValidationResult.reportError(s"expected boolean value; ${ value.valueTypeDescription } found [value: ${ value }]")

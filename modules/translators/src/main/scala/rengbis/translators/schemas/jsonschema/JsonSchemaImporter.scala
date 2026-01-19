@@ -11,6 +11,13 @@ import zio.json.ast.Json
   */
 object JsonSchemaImporter:
 
+    /** Result of importing a JSON Schema, including the root schema and any named definitions. */
+    case class ImportResult(
+        root: Schema,
+        definitions: Map[String, Schema],
+        report: FrictionReport
+    )
+
     /** Imports a JSON Schema to ReNGBis schema.
       *
       * @param jsonSchemaText
@@ -19,20 +26,36 @@ object JsonSchemaImporter:
       *   Either an error message or tuple of (ReNGBis Schema, FrictionReport)
       */
     def fromJsonSchema(jsonSchemaText: String): Either[String, (Schema, FrictionReport)] =
+        fromJsonSchemaWithDefinitions(jsonSchemaText).map(r => (r.root, r.report))
+
+    /** Imports a JSON Schema to ReNGBis schema, including named definitions.
+      *
+      * @param jsonSchemaText
+      *   The JSON Schema as a string
+      * @return
+      *   Either an error message or ImportResult containing root schema, definitions, and friction report
+      */
+    def fromJsonSchemaWithDefinitions(jsonSchemaText: String): Either[String, ImportResult] =
         jsonSchemaText.fromJson[Json] match
             case Left(error)    => Left(s"Failed to parse JSON: $error")
             case Right(jsonAst) =>
                 val context = TranslationContext(rootJson = jsonAst)
                 translateSchema(jsonAst, context) match
                     case Left(error)          => Left(error)
-                    case Right((schema, ctx)) => Right((schema, ctx.report))
+                    case Right((schema, ctx)) =>
+                        // Now translate all definitions that were referenced
+                        val defsResult = translateAllDefinitions(jsonAst, ctx)
+                        defsResult.map { case (definitions, finalCtx) =>
+                            ImportResult(schema, definitions, finalCtx.report)
+                        }
 
     private case class TranslationContext(
         path: String = "$",
         report: FrictionReport = FrictionReport(),
         definitions: Map[String, Json] = Map.empty,
         rootJson: Json = Json.Obj(),
-        resolvedRefs: Set[String] = Set.empty // Track refs being resolved to detect cycles
+        resolvedRefs: Set[String] = Set.empty, // Track refs being resolved to detect cycles
+        referencedDefs: Set[String] = Set.empty // Track definitions that need to be output as named schemas
     ):
         def atPath(newPath: String): TranslationContext =
             copy(path = if newPath.startsWith("$") then newPath else s"$path/$newPath")
@@ -54,6 +77,9 @@ object JsonSchemaImporter:
 
         def isResolvingRef(ref: String): Boolean =
             resolvedRefs.contains(ref)
+
+        def addReferencedDef(name: String): TranslationContext =
+            copy(referencedDefs = referencedDefs + name)
 
     /** Resolves a JSON Pointer (RFC 6901) path within a JSON document.
       * @param json
@@ -115,34 +141,25 @@ object JsonSchemaImporter:
 
                 typeResult.map { case (schema, ctx) =>
                     // Wrap with metadata if present
-                    // Note: Documented is only valid for ObjectValue in ReNGBis syntax
-                    val (withDoc, docCtx) = fields.get("description") match
-                        case Some(Json.Str(desc)) =>
-                            schema match
-                                case _: ObjectValue => (Documented(Some(desc), schema), ctx)
-                                case _              =>
-                                    // Documentation on non-object types is lost
-                                    (
-                                        schema,
-                                        ctx.addLoss(
-                                            s"description on non-object type lost: '${ desc.take(50) }...'",
-                                            Some("Documentation is only supported on object types in ReNGBis")
-                                        )
-                                    )
-                        case _                    => (schema, ctx)
+                    // Documentation can be applied to any schema type in ReNGBis when used as a property value
+                    val withDoc = fields.get("description") match
+                        case Some(Json.Str(desc)) => Documented(Some(desc), schema)
+                        case _                    => schema
 
                     val withDeprecated = fields.get("deprecated") match
                         case Some(Json.Bool(true)) => Deprecated(withDoc)
                         case _                     => withDoc
 
-                    (withDeprecated, docCtx)
+                    (withDeprecated, ctx)
                 }
 
     private def translateRef(ref: String, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         if ref.startsWith("#/$defs/") || ref.startsWith("#/definitions/") then
-            // Internal reference to $defs/definitions - use NamedValueReference
-            val name = ref.split("/").last
-            Right((NamedValueReference(name), context))
+            // Internal reference to $defs/definitions - use named reference and track it
+            val name       = ref.split("/").last
+            // Track that this definition is referenced and needs to be output
+            val updatedCtx = context.addReferencedDef(name)
+            Right((NamedValueReference(name), updatedCtx))
         else if ref == "#" then
             // Self-reference (recursive schema)
             if context.isResolvingRef(ref) then
@@ -206,7 +223,11 @@ object JsonSchemaImporter:
             case "string"  => translateString(fields, context)
             case "number"  => translateNumber(fields, context, isInteger = false)
             case "integer" => translateNumber(fields, context, isInteger = true)
-            case "boolean" => Right((BooleanValue(), context))
+            case "boolean" =>
+                val default = fields.get("default") match
+                    case Some(Json.Bool(b)) => Some(b)
+                    case _                  => None
+                Right((BooleanValue(default), context))
             case "null"    =>
                 val ctx = context.addApproximation(
                     "null type not directly supported in ReNGBis",
@@ -220,23 +241,38 @@ object JsonSchemaImporter:
                 Right((AnyValue(), ctx))
 
     private def translateMultipleTypes(types: List[Json], fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
-        var currentCtx = context.addApproximation(
-            s"Multiple types array translated to AlternativeValues (anyOf)",
-            Some("Type arrays are converted to union types")
-        )
+        var currentCtx = context
 
-        val typeSchemas = types.flatMap:
-            case Json.Str(typeName) =>
-                translateTypedSchema(typeName, Map.empty, currentCtx) match
-                    case Right((schema, ctx)) =>
-                        currentCtx = ctx
-                        Some(schema)
-                    case Left(_)              => None
-            case _                  => None
+        // Filter out null types - in ReNGBis, nullability is handled through optional fields
+        val nonNullTypes = types.collect { case Json.Str(t) if t != "null" => t }
+        val hasNull      = types.exists { case Json.Str("null") => true; case _ => false }
 
-        if typeSchemas.isEmpty then Left("No valid types in type array")
+        if hasNull && nonNullTypes.nonEmpty then
+            currentCtx = currentCtx.addApproximation(
+                "null in type array handled through field optionality",
+                Some("In ReNGBis, use optional fields (name?) instead of nullable types")
+            )
+
+        // Pass the fields to each type translation so constraints like `items` are preserved
+        val typeSchemas = nonNullTypes.flatMap: typeName =>
+            translateTypedSchema(typeName, fields, currentCtx) match
+                case Right((schema, ctx)) =>
+                    currentCtx = ctx
+                    Some(schema)
+                case Left(_)              => None
+
+        if typeSchemas.isEmpty then
+            // All types were null or failed to translate
+            if hasNull then Right((AnyValue(), currentCtx.addApproximation("type array containing only null", None)))
+            else Left("No valid types in type array")
         else if typeSchemas.size == 1 then Right((typeSchemas.head, currentCtx))
-        else Right((AlternativeValues(typeSchemas*), currentCtx))
+        else
+            // Only add approximation note if we actually have multiple non-null types
+            currentCtx = currentCtx.addApproximation(
+                s"Multiple types array translated to AlternativeValues (anyOf)",
+                Some("Type arrays are converted to union types")
+            )
+            Right((AlternativeValues(typeSchemas*), currentCtx))
 
     private def translateUntyped(fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         // Check for composition keywords first
@@ -284,6 +320,10 @@ object JsonSchemaImporter:
                     else Right((EnumValues(allStringValues*), context))
                 case _                => Right((AnyValue(), context))
             })
+            // Handle implicit object schemas (have properties but no type)
+            .orElse(fields.get("properties").map(_ => translateObjectType(fields, context)))
+            // Handle implicit map schemas (have additionalProperties but no type or properties)
+            .orElse(fields.get("additionalProperties").map(_ => translateObjectType(fields, context)))
             .getOrElse(Right((AnyValue(), context)))
 
     private def translateString(fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
@@ -475,32 +515,71 @@ object JsonSchemaImporter:
     private def translateObjectType(fields: Map[String, Json], context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         var currentCtx = context
 
-        // Check if this is a map (additionalProperties with no properties)
-        (fields.get("properties"), fields.get("additionalProperties")) match
-            case (None, Some(additionalProps)) if additionalProps != Json.Bool(false) =>
+        // Check if this is a map (additionalProperties with no properties and no allOf)
+        (fields.get("properties"), fields.get("additionalProperties"), fields.get("allOf")) match
+            case (None, Some(additionalProps), None) if additionalProps != Json.Bool(false) =>
                 // This is a map
                 translateSchema(additionalProps, currentCtx.atPath("additionalProperties")).map { case (schema, ctx) =>
                     (MapValue(schema), ctx)
                 }
-            case _                                                                    =>
-                // Regular object with properties
-                fields.get("properties") match
-                    case Some(Json.Obj(props)) if props.nonEmpty =>
-                        val required = fields.get("required") match
-                            case Some(Json.Arr(reqs)) => reqs.toList.collect { case Json.Str(s) => s }.toSet
-                            case _                    => Set.empty[String]
+            case _                                                                          =>
+                // Check for allOf - this is common pattern for object schemas
+                // where properties are defined in separate schemas and combined with allOf
+                val allOfResult: Either[String, (Option[Schema], TranslationContext)] = fields.get("allOf") match
+                    case Some(allOfJson) => translateAllOf(allOfJson, currentCtx).map { case (s, c) => (Some(s), c) }
+                    case None            => Right((None, currentCtx))
 
-                        props.toList
-                            .foldLeft[Either[String, (Map[ObjectLabel, Schema], TranslationContext)]](Right((Map.empty, currentCtx))):
-                                case (Right((objectFields, ctx)), (name, propSchema)) =>
-                                    translateSchema(propSchema, ctx.atPath(s"properties/$name")) match
-                                        case Left(error)             => Left(error)
-                                        case Right((schema, newCtx)) =>
-                                            val label = if required.contains(name) then MandatoryLabel(name) else OptionalLabel(name)
-                                            Right((objectFields + (label -> schema), newCtx))
-                                case (left @ Left(_), _)                              => left
-                            .map { case (objectFields, ctx) =>
-                                var finalCtx = ctx
+                allOfResult match
+                    case Left(error)                            => Left(error)
+                    case Right((allOfSchemaOpt, ctxAfterAllOf)) =>
+                        currentCtx = ctxAfterAllOf
+
+                        // Also check for direct properties
+                        val directPropsResult: Either[String, (Option[Schema], TranslationContext)] = fields.get("properties") match
+                            case Some(Json.Obj(props)) if props.nonEmpty =>
+                                val required = fields.get("required") match
+                                    case Some(Json.Arr(reqs)) => reqs.toList.collect { case Json.Str(s) => s }.toSet
+                                    case _                    => Set.empty[String]
+
+                                props.toList
+                                    .foldLeft[Either[String, (Map[ObjectLabel, Schema], TranslationContext)]](Right((Map.empty, currentCtx))):
+                                        case (Right((objectFields, ctx)), (name, propSchema)) =>
+                                            translateSchema(propSchema, ctx.atPath(s"properties/$name")) match
+                                                case Left(error)             => Left(error)
+                                                case Right((schema, newCtx)) =>
+                                                    val label = if required.contains(name) then MandatoryLabel(name) else OptionalLabel(name)
+                                                    Right((objectFields + (label -> schema), newCtx))
+                                        case (left @ Left(_), _)                              => left
+                                    .map { case (objectFields, ctx) => (Some(ObjectValue(objectFields)): Option[Schema], ctx) }
+                            case _                                       => Right((None, currentCtx))
+
+                        directPropsResult match
+                            case Left(error)                            => Left(error)
+                            case Right((directPropsOpt, ctxAfterProps)) =>
+                                currentCtx = ctxAfterProps
+
+                                // Merge allOf schema with direct properties
+                                val mergedSchema: Schema = (allOfSchemaOpt, directPropsOpt) match
+                                    case (Some(ov1: ObjectValue), Some(ov2: ObjectValue)) =>
+                                        // Merge properties from both
+                                        ObjectValue(ov1.obj ++ ov2.obj)
+                                    case (Some(ov: ObjectValue), Some(_))                 => ov
+                                    case (Some(_), Some(ov: ObjectValue))                 => ov
+                                    case (Some(schema), Some(_))                          => schema
+                                    case (Some(schema), None)                             => schema
+                                    case (None, Some(schema))                             => schema
+                                    case (None, None)                                     =>
+                                        // Object without properties or allOf - treat as open map
+                                        fields.get("additionalProperties") match
+                                            case Some(Json.Bool(false)) =>
+                                                currentCtx = currentCtx.addApproximation(
+                                                    "closed empty object approximated as open map",
+                                                    Some("JSON Schema with no properties and additionalProperties:false")
+                                                )
+                                            case _                      => ()
+                                        MapValue(AnyValue())
+
+                                var finalCtx = currentCtx
 
                                 // Check for unsupported features
                                 if fields.contains("patternProperties") then
@@ -527,23 +606,7 @@ object JsonSchemaImporter:
                                         Some("Document dependencies in description field")
                                     )
 
-                                (ObjectValue(objectFields), finalCtx)
-                            }
-
-                    case None =>
-                        // Object without properties - treat as open map
-                        // Note: additionalProperties: false with no properties means "no valid object"
-                        // but we approximate it as an open map since empty ObjectValue can't be printed
-                        fields.get("additionalProperties") match
-                            case Some(Json.Bool(false)) =>
-                                val ctx = currentCtx.addApproximation(
-                                    "closed empty object approximated as open map",
-                                    Some("JSON Schema with no properties and additionalProperties:false")
-                                )
-                                Right((MapValue(AnyValue()), ctx))
-                            case _                      => Right((MapValue(AnyValue()), currentCtx))
-
-                    case _ => Left("Invalid properties definition")
+                                Right((mergedSchema, finalCtx))
 
     private def translateAnyOf(json: Json, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         json match
@@ -574,18 +637,152 @@ object JsonSchemaImporter:
     private def translateAllOf(json: Json, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
         json match
             case Json.Arr(schemas) =>
-                // Try to merge schemas
-                var currentCtx = context
                 val schemaList = schemas.toList
+                if schemaList.isEmpty then Right((AnyValue(), context))
+                else
+                    // Translate all schemas in the allOf, inlining $ref definitions so we can merge properties
+                    schemaList.zipWithIndex
+                        .foldLeft[Either[String, (List[Schema], TranslationContext)]](Right((List.empty, context))):
+                            case (Right((translatedSchemas, ctx)), (schema, idx)) =>
+                                translateSchemaInliningRefs(schema, ctx.atPath(s"allOf[$idx]")) match
+                                    case Left(error)                 => Left(error)
+                                    case Right((translated, newCtx)) => Right((translatedSchemas :+ translated, newCtx))
+                            case (left @ Left(_), _)                              => left
+                        .map { case (translatedSchemas, ctx) =>
+                            // Try to merge the schemas
+                            mergeAllOfSchemas(translatedSchemas, ctx)
+                        }
 
-                // For now, report as friction and use first schema
-                // TODO: Implement smart merging for compatible types
-                currentCtx = currentCtx.addLoss(
+            case _ => Left("allOf must be an array")
+
+    /** Translates a schema, inlining $ref definitions instead of creating NamedValueReference. This is used for allOf where we need to merge the actual properties.
+      */
+    private def translateSchemaInliningRefs(json: Json, context: TranslationContext): Either[String, (Schema, TranslationContext)] =
+        json match
+            case Json.Obj(fields) =>
+                val fieldsMap = fields.toMap
+                fieldsMap.get("$ref") match
+                    case Some(Json.Str(ref)) if ref.startsWith("#/$defs/") || ref.startsWith("#/definitions/") =>
+                        // Inline the definition instead of creating a NamedValueReference
+                        val name    = ref.split("/").last
+                        val pointer = if ref.startsWith("#/$defs/") then "/$defs/" + name else "/definitions/" + name
+
+                        // Still track the reference for output
+                        val ctxWithRef = context.addReferencedDef(name)
+
+                        if ctxWithRef.isResolvingRef(ref) then
+                            // Cycle detected - use named reference to break the cycle
+                            Right((NamedValueReference(name), ctxWithRef))
+                        else
+                            resolveJsonPointer(ctxWithRef.rootJson, pointer) match
+                                case Some(referencedJson) =>
+                                    val ctxResolving = ctxWithRef.withResolvedRef(ref)
+                                    translateSchema(referencedJson, ctxResolving)
+                                case None                 =>
+                                    // Definition not found - use named reference
+                                    Right((NamedValueReference(name), ctxWithRef))
+                    case _                                                                                     =>
+                        // Not a definition $ref, use normal translation
+                        translateSchema(json, context)
+            case _                => translateSchema(json, context)
+
+    /** Merges multiple schemas from an allOf into a single schema. For object schemas, properties are merged. For other types, only the first schema is used.
+      */
+    private def mergeAllOfSchemas(schemas: List[Schema], context: TranslationContext): (Schema, TranslationContext) =
+        if schemas.isEmpty then (AnyValue(), context)
+        else if schemas.size == 1 then (schemas.head, context)
+        else
+            // Collect all ObjectValue schemas (including Documented ones) and their properties
+            val (objectSchemas, nonObjectSchemas) = schemas.partition:
+                case _: ObjectValue                => true
+                case Documented(_, _: ObjectValue) => true
+                case _                             => false
+
+            val objectValues = objectSchemas.flatMap:
+                case ov: ObjectValue                => Some(ov)
+                case Documented(_, ov: ObjectValue) => Some(ov)
+                case _                              => None
+
+            if objectValues.nonEmpty then
+                // Merge all object properties
+                val mergedProperties = objectValues.flatMap(_.obj).toMap
+                var currentCtx       = context
+
+                // If there are non-object schemas, report friction
+                if nonObjectSchemas.nonEmpty then
+                    currentCtx = currentCtx.addApproximation(
+                        s"allOf contains ${ nonObjectSchemas.size } non-object schema(s) that were merged with object properties",
+                        Some("Non-object schemas in allOf with object schemas may have different semantics")
+                    )
+
+                (ObjectValue(mergedProperties), currentCtx)
+            else
+                // No object schemas - report friction and use first schema
+                val currentCtx = context.addLoss(
                     "allOf intersection semantics cannot be fully preserved in ReNGBis",
                     Some("Consider merging constraints manually or using composition")
                 )
+                (schemas.head, currentCtx)
 
-                if schemaList.nonEmpty then translateSchema(schemaList.head, currentCtx.atPath("allOf[0]"))
-                else Right((AnyValue(), currentCtx))
+    /** Translates all referenced definitions from the JSON Schema to ReNGBis schemas. This recursively translates definitions, discovering new referenced definitions as it goes.
+      */
+    private def translateAllDefinitions(rootJson: Json, context: TranslationContext): Either[String, (Map[String, Schema], TranslationContext)] =
+        // Get the definitions object from the root JSON
+        val defsJson: Map[String, Json] = rootJson match
+            case Json.Obj(fields) =>
+                val fieldsMap = fields.toMap
+                fieldsMap.get("$defs").orElse(fieldsMap.get("definitions")) match
+                    case Some(Json.Obj(defs)) => defs.toMap
+                    case _                    => Map.empty
+            case _                => Map.empty
 
-            case _ => Left("allOf must be an array")
+        if defsJson.isEmpty then Right((Map.empty, context))
+        else
+            // Iteratively translate definitions until no new ones are discovered
+            var currentCtx        = context
+            var translatedDefs    = Map.empty[String, Schema]
+            var pendingDefs       = currentCtx.referencedDefs
+            var processedDefNames = Set.empty[String]
+
+            while pendingDefs.nonEmpty do
+                val defName = pendingDefs.head
+                pendingDefs = pendingDefs - defName
+
+                if !processedDefNames.contains(defName) then
+                    processedDefNames = processedDefNames + defName
+
+                    defsJson.get(defName) match
+                        case Some(defJson) =>
+                            // Create a fresh context for translating this definition to avoid interference
+                            val defContext = TranslationContext(
+                                path = s"$$/$defName",
+                                report = currentCtx.report,
+                                definitions = defsJson,
+                                rootJson = rootJson,
+                                resolvedRefs = Set.empty,
+                                referencedDefs = currentCtx.referencedDefs
+                            )
+
+                            translateSchema(defJson, defContext) match
+                                case Left(error)          =>
+                                    // Add error to report but continue with other definitions
+                                    currentCtx = currentCtx.addLoss(
+                                        s"Failed to translate definition '$defName': $error",
+                                        None
+                                    )
+                                case Right((schema, ctx)) =>
+                                    translatedDefs = translatedDefs + (defName -> schema)
+                                    // Merge newly discovered references
+                                    val newRefs = ctx.referencedDefs -- processedDefNames
+                                    pendingDefs = pendingDefs ++ newRefs
+                                    currentCtx = currentCtx.copy(
+                                        report = ctx.report,
+                                        referencedDefs = currentCtx.referencedDefs ++ ctx.referencedDefs
+                                    )
+                        case None          =>
+                            currentCtx = currentCtx.addLoss(
+                                s"Referenced definition '$defName' not found in schema",
+                                Some("Check that the definition exists in $defs or definitions")
+                            )
+
+            Right((translatedDefs, currentCtx))

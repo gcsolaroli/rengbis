@@ -53,7 +53,7 @@ object AvroExporter:
                     updatedContext
                 )
 
-            case BooleanValue() =>
+            case BooleanValue(_) =>
                 (Json.Str("boolean"), context)
 
             case TextValue(constraints, defaultValue) =>
