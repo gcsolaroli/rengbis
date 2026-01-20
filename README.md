@@ -180,7 +180,7 @@ exactSize = text [ length == 10 ]
 = text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 ]
 ```
 Text values may be constraint with either a `regex` or a `length`.
-This would match an ISO8060 date value, like `2025-12-27`.
+This would match an ISO8601 date value, like `2025-12-27`.
 
 #### Pattern
 It's also possible to use COBOL like 'picture clause' in order to express easier to read formats.
