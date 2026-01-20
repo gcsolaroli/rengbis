@@ -23,7 +23,7 @@ object Main extends ZIOCliDefault:
     enum RengbisCommand:
         case ValidateSchema(schemaFiles: List[Path])
         case ValidateData(format: Format, schemaFile: Path, schema: Option[String], dataFiles: List[Path])
-        case TranslateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], report: Option[Path], style: OutputStyle, fetchExternal: Boolean)
+        case TranslateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], report: Option[Path], style: OutputStyle, fetchExternal: Boolean, rootElement: Option[String])
         case TranslateSchemaTo(format: SchemaFormat, source: Path, target: Option[Path], report: Option[Path], rootName: Option[String])
 
     val formatOption: Options[Format] =
@@ -75,6 +75,11 @@ object Main extends ZIOCliDefault:
             .text("root-name")
             .optional ?? "Root element name for XSD export (default: 'root')"
 
+    def rootElementOption: Options[Option[String]] =
+        Options
+            .text("root-element")
+            .optional ?? "Root element name for XSD import (default: first global element)"
+
     val outputStyleOption: Options[OutputStyle] =
         Options
             .enumeration[OutputStyle]("style")(
@@ -117,10 +122,13 @@ object Main extends ZIOCliDefault:
             }
 
     def translateSchemaFromCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
-        Command("translate-schema-from", schemaFormatOption ++ sourceFileOption(exists) ++ targetFileOption ++ reportFileOption ++ outputStyleOption ++ fetchExternalOption)
+        Command(
+            "translate-schema-from",
+            schemaFormatOption ++ sourceFileOption(exists) ++ targetFileOption ++ reportFileOption ++ outputStyleOption ++ fetchExternalOption ++ rootElementOption
+        )
             .withHelp(translateSchemaFromHelp)
-            .map { case (format, source, target, report, style, fetchExternal) =>
-                RengbisCommand.TranslateSchemaFrom(format, source, target, report, style, fetchExternal)
+            .map { case (format, source, target, report, style, fetchExternal, rootElement) =>
+                RengbisCommand.TranslateSchemaFrom(format, source, target, report, style, fetchExternal, rootElement)
             }
 
     def translateSchemaToCommand(exists: Exists = Exists.Yes): Command[RengbisCommand] =
@@ -151,10 +159,10 @@ object Main extends ZIOCliDefault:
 
     def execute(cmd: RengbisCommand): ZIO[Any, Throwable, Unit] =
         cmd match
-            case RengbisCommand.ValidateSchema(schemaFiles)                                               => validateSchemas(schemaFiles)
-            case RengbisCommand.ValidateData(format, schemaFile, schema, dataFiles)                       => validateData(format, schemaFile, schema, dataFiles)
-            case RengbisCommand.TranslateSchemaFrom(format, source, target, report, style, fetchExternal) => translateSchemaFrom(format, source, target, report, style, fetchExternal)
-            case RengbisCommand.TranslateSchemaTo(format, source, target, report, rootName)               => translateSchemaTo(format, source, target, report, rootName)
+            case RengbisCommand.ValidateSchema(schemaFiles)                                                            => validateSchemas(schemaFiles)
+            case RengbisCommand.ValidateData(format, schemaFile, schema, dataFiles)                                    => validateData(format, schemaFile, schema, dataFiles)
+            case RengbisCommand.TranslateSchemaFrom(format, source, target, report, style, fetchExternal, rootElement) => translateSchemaFrom(format, source, target, report, style, fetchExternal, rootElement)
+            case RengbisCommand.TranslateSchemaTo(format, source, target, report, rootName)                            => translateSchemaTo(format, source, target, report, rootName)
 
     def validateSchemas(paths: List[Path]): ZIO[Any, Throwable, Unit] =
         ZIO.foreach(paths) { path =>
@@ -198,7 +206,7 @@ object Main extends ZIOCliDefault:
             _                               <- ZIO.when(invalid > 0)(ZIO.fail(new RuntimeException(s"$invalid file(s) failed validation")))
         yield ()
 
-    def translateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], reportPath: Option[Path], style: OutputStyle, fetchExternal: Boolean): ZIO[Any, Throwable, Unit] =
+    def translateSchemaFrom(format: SchemaFormat, source: Path, target: Option[Path], reportPath: Option[Path], style: OutputStyle, fetchExternal: Boolean, rootElement: Option[String]): ZIO[Any, Throwable, Unit] =
         import rengbis.translators.schemas.xsd.{ XsdImporter, XsdExporter }
         import rengbis.translators.schemas.jsonschema.{ JsonSchemaImporter, JsonSchemaExporter }
         import rengbis.translators.schemas.avro.{ AvroImporter, AvroExporter }
@@ -210,7 +218,9 @@ object Main extends ZIOCliDefault:
             case OutputStyle.Expanded => PrintConfig.expanded
 
         // Use HTTP fetcher only if --fetch-external flag is set
-        val fetcher: SchemaFetcher = if fetchExternal then HttpSchemaFetcher else SchemaFetcher.NoOp
+        // Resolve relative paths against the source file's directory
+        val sourceDir              = Option(source.getParent).getOrElse(Path.of("."))
+        val fetcher: SchemaFetcher = if fetchExternal then HttpSchemaFetcher.withBasePath(sourceDir) else SchemaFetcher.NoOp
 
         for
             sourceContent <- ZIO.attempt(Files.readString(source))
@@ -232,12 +242,24 @@ object Main extends ZIOCliDefault:
                                                                      Console.printLine(s"Friction report written to ${ path.getFileName }")
                                                              case None       => ZIO.unit
                                      yield output
+                                 case SchemaFormat.Xsd        =>
+                                     // Use the new method that returns all global elements as definitions
+                                     for
+                                         importResult <- ZIO.fromEither(XsdImporter.fromXsdWithDefinitions(sourceContent, fetcher))
+                                                             .mapError(e => new RuntimeException(s"Failed to import schema: $e"))
+                                         output        = SchemaPrinter.printDefinitionsOnly(importResult.definitions, printConfig)
+                                         _            <- reportPath match
+                                                             case Some(path) =>
+                                                                 val reportContent = if path.toString.endsWith(".md") then importResult.report.toMarkdown else importResult.report.toPlainText
+                                                                 ZIO.attempt(Files.writeString(path, reportContent)) *>
+                                                                     Console.printLine(s"Friction report written to ${ path.getFileName }")
+                                                             case None       => ZIO.unit
+                                     yield output
                                  case _                       =>
                                      // Other formats use the original method
                                      for
                                          result                  <- ZIO.fromEither {
                                                                         format match
-                                                                            case SchemaFormat.Xsd  => XsdImporter.fromXsd(sourceContent)
                                                                             case SchemaFormat.Avro => AvroImporter.fromAvro(sourceContent)
                                                                             case _                 => Left("Unexpected format")
                                                                     }.mapError(e => new RuntimeException(s"Failed to import schema: $e"))

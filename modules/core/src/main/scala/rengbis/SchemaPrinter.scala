@@ -75,6 +75,22 @@ object SchemaPrinter:
 
         sb.toString()
 
+    /** Prints a schema file with only definitions (no root schema). */
+    def printDefinitionsOnly(
+        definitions: Map[String, Schema],
+        config: PrintConfig = PrintConfig.pretty
+    ): String =
+        val sb = StringBuilder()
+
+        if definitions.nonEmpty then
+            val sortedDefs = definitions.toSeq.sortBy(_._1)
+            for (name, schema) <- sortedDefs do
+                val schemaStr = printSchema(schema, 0, config)
+                sb.append(s"$name = $schemaStr")
+                sb.append("\n\n")
+
+        sb.toString().stripSuffix("\n\n")
+
     // ========================================================================
     // Private implementation
     // ========================================================================
