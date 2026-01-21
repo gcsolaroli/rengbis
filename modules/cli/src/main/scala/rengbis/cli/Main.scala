@@ -15,7 +15,7 @@ object Main extends ZIOCliDefault:
         case Json, Yaml, Xml, Csv
 
     enum SchemaFormat:
-        case Xsd, JsonSchema, Avro
+        case Xsd, JsonSchema, Avro, Protobuf
 
     enum OutputStyle:
         case Compact, Pretty, Expanded
@@ -41,9 +41,10 @@ object Main extends ZIOCliDefault:
             .enumeration[SchemaFormat]("format")(
                 "xsd"        -> SchemaFormat.Xsd,
                 "jsonschema" -> SchemaFormat.JsonSchema,
-                "avro"       -> SchemaFormat.Avro
+                "avro"       -> SchemaFormat.Avro,
+                "protobuf"   -> SchemaFormat.Protobuf
             )
-            .alias("f") ?? "Schema format (xsd, jsonschema, avro)"
+            .alias("f") ?? "Schema format (xsd, jsonschema, avro, protobuf)"
 
     def schemaFileOption(exists: Exists = Exists.Yes): Options[Path] =
         Options
@@ -210,6 +211,7 @@ object Main extends ZIOCliDefault:
         import rengbis.translators.schemas.xsd.{ XsdImporter, XsdExporter }
         import rengbis.translators.schemas.jsonschema.{ JsonSchemaImporter, JsonSchemaExporter }
         import rengbis.translators.schemas.avro.{ AvroImporter, AvroExporter }
+        import rengbis.translators.schemas.protobuf.{ ProtobufImporter, ProtobufExporter }
         import rengbis.translators.common.{ FrictionReport, SchemaFetcher }
 
         val printConfig = style match
@@ -255,14 +257,10 @@ object Main extends ZIOCliDefault:
                                                                      Console.printLine(s"Friction report written to ${ path.getFileName }")
                                                              case None       => ZIO.unit
                                      yield output
-                                 case _                       =>
-                                     // Other formats use the original method
+                                 case SchemaFormat.Avro       =>
                                      for
-                                         result                  <- ZIO.fromEither {
-                                                                        format match
-                                                                            case SchemaFormat.Avro => AvroImporter.fromAvro(sourceContent)
-                                                                            case _                 => Left("Unexpected format")
-                                                                    }.mapError(e => new RuntimeException(s"Failed to import schema: $e"))
+                                         result                  <- ZIO.fromEither(AvroImporter.fromAvro(sourceContent))
+                                                                        .mapError(e => new RuntimeException(s"Failed to import schema: $e"))
                                          (schema, frictionReport) = result
                                          output                   = s"= ${ SchemaPrinter.print(schema, printConfig) }"
                                          _                       <- reportPath match
@@ -271,6 +269,18 @@ object Main extends ZIOCliDefault:
                                                                             ZIO.attempt(Files.writeString(path, reportContent)) *>
                                                                                 Console.printLine(s"Friction report written to ${ path.getFileName }")
                                                                         case None       => ZIO.unit
+                                     yield output
+                                 case SchemaFormat.Protobuf   =>
+                                     for
+                                         importResult <- ZIO.fromEither(ProtobufImporter.fromProtobuf(sourceContent))
+                                                             .mapError(e => new RuntimeException(s"Failed to import schema: $e"))
+                                         output        = SchemaPrinter.printDefinitionsOnly(importResult.definitions, printConfig)
+                                         _            <- reportPath match
+                                                             case Some(path) =>
+                                                                 val reportContent = if path.toString.endsWith(".md") then importResult.report.toMarkdown else importResult.report.toPlainText
+                                                                 ZIO.attempt(Files.writeString(path, reportContent)) *>
+                                                                     Console.printLine(s"Friction report written to ${ path.getFileName }")
+                                                             case None       => ZIO.unit
                                      yield output
             _             <- target match
                                  case Some(path) => ZIO.attempt(Files.writeString(path, output))
@@ -284,6 +294,7 @@ object Main extends ZIOCliDefault:
         import rengbis.translators.schemas.xsd.{ XsdImporter, XsdExporter }
         import rengbis.translators.schemas.jsonschema.{ JsonSchemaImporter, JsonSchemaExporter }
         import rengbis.translators.schemas.avro.{ AvroImporter, AvroExporter }
+        import rengbis.translators.schemas.protobuf.{ ProtobufImporter, ProtobufExporter }
         import rengbis.translators.common.FrictionReport
         import zio.json.EncoderOps
 
@@ -297,6 +308,9 @@ object Main extends ZIOCliDefault:
                                               case SchemaFormat.Avro       =>
                                                   val (json, report) = AvroExporter.toAvro(schema.root.get, rootName.getOrElse("Record"))
                                                   (json.toJsonPretty, report)
+                                              case SchemaFormat.Protobuf   =>
+                                                  val result = ProtobufExporter.toProtobuf(schema.root.get, rootName.getOrElse("Root"))
+                                                  (result.proto, result.report)
             output                      = outputRaw
             _                          <- target match
                                               case Some(path) => ZIO.attempt(Files.writeString(path, output))
