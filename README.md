@@ -368,6 +368,88 @@ types => import ./types.rengbis
 
 The `root` element of the imported schema definition may also be used, just referring to the *scope* name.
 
+
+# Schema Translators
+ReNGBis can translate schemas from other formats (converting them to ReNGBis) and export ReNGBis schemas to other formats.
+
+> [!WARNING]
+> This translation feature is still a rough prototype, with code mostly written by Claude Code, and not yet carefully validated.
+> It has been done this way to get an idea on how effective could such translation abilities become.
+> The preliminary results have been quite intriguing, so a closer inspection on the code doing the translation is definitely worth doing.
+
+In the meanwhile, this feature enables:
+- get a ReNGBis version of an existing schema
+- transform a ReNGBis schema in a format compatible with other tools
+
+### Supported Schema Formats
+
+| Format  | Notes |
+|--------|-------|
+| JSON Schema | Draft 2020-12 supported |
+| XSD | XML Schema Definition |
+| Avro | Apache Avro schema format |
+| Protocol Buffers | Proto3 syntax |
+
+### `translate-schema-from` (External Format to ReNGBis)
+
+```bash
+rengbis translate-schema-from --format jsonschema schema.json
+rengbis translate-schema-from --format xsd schema.xsd
+rengbis translate-schema-from --format avro schema.avsc
+rengbis translate-schema-from --format protobuf schema.proto
+```
+
+Options:
+- `--target <file>` - Output file (defaults to stdout)
+- `--report <file>` - Friction report file (use `.md` extension for Markdown format)
+- `--style <compact|expanded>` - Output formatting style
+- `--fetch-external` - Fetch external schema references (JSON Schema `$ref` URLs)
+- `--root-element <name>` - Root element name for XSD import
+
+### `translate-schema-to` (ReNGBis to External Format)
+
+```bash
+rengbis translate-schema-to --format jsonschema schema.rengbis
+rengbis translate-schema-to --format xsd schema.rengbis
+rengbis translate-schema-to --format avro schema.rengbis
+rengbis translate-schema-to --format protobuf schema.rengbis
+```
+
+Options:
+- `--target <file>` - Output file (defaults to stdout)
+- `--report <file>` - Friction report file
+- `--root-name <name>` - Root element/record name (default: "root" for XSD, "Record" for Avro)
+
+### Friction Reports
+
+During translation, a **friction report** can be generated listing constructs that couldn't be translated cleanly. This includes:
+- **Unsupported constructs** - Features with no equivalent (e.g., JSON Schema `not` keyword)
+- **Approximations** - Features that were converted with some loss of precision
+- **Ambiguities** - Constructs where the translation required interpretation
+
+Example friction report:
+```markdown
+# Import Friction Report
+Source: person.json (JSON Schema Draft 2020-12)
+
+## Unsupported constructs
+- Line 15: `"not": {"type": "null"}` - negation not supported, ignored
+
+## Approximations
+- Line 8: `"default": "active"` - converted to ReNGBis default value
+```
+
+### Translation Limitations
+
+Not all features translate perfectly between formats:
+- **Constraints** (length, regex, ranges) are fully preserved in JSON Schema and XSD, but become documentation comments in Avro and Protobuf
+- **Tuples** have no direct equivalent in Avro or Protobuf
+- **Maps** require workarounds in XSD
+- **Field numbers** are auto-generated when exporting to Protobuf
+
+
+
+
 # Status of the project
 This is a very early prototype, shared only to get some feedback; besides the few tests included in the code base, it has not been used anywhere else.
 
