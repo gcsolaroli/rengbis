@@ -1,0 +1,38 @@
+{
+  "name": "tree-sitter-rengbis",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for ReNGBis schema language",
+  "main": "bindings/node",
+  "keywords": [
+    "tree-sitter",
+    "parser",
+    "rengbis",
+    "schema"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/tree-sitter-rengbis"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "nan": "^2.17.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.20.8"
+  },
+  "scripts": {
+    "build": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.rengbis",
+      "file-types": [
+        "rengbis",
+        "rng"
+      ],
+      "injection-regex": "rengbis"
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+================================================================================
+Simple object
+================================================================================
+
+= {
+    name: text
+    age: number
+}
+
+--------------------------------------------------------------------------------
+
+(schema
+  (root
+    (object_value
+      (object_fields
+        (object_field
+          (object_label
+            (mandatory_label
+              (identifier)))
+          (text_value))
+        (object_field
+          (object_label
+            (mandatory_label
+              (identifier)))
+          (numeric_value))))))
+
+================================================================================
+Object with optional field
+================================================================================
+
+= {
+    name: text
+    email?: text
+}
+
+--------------------------------------------------------------------------------
+
+(schema
+  (root
+    (object_value
+      (object_fields
+        (object_field
+          (object_label
+            (mandatory_label
+              (identifier)))
+          (text_value))
+        (object_field
+          (object_label
+            (optional_label
+              (identifier)))
+          (text_value))))))
+
+================================================================================
+Map value
+================================================================================
+
+= { ...: text }
+
+--------------------------------------------------------------------------------
+
+(schema
+  (root
+    (map_value
+      (spread_key)
+      (text_value))))

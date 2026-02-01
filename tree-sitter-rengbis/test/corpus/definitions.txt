@@ -1,0 +1,93 @@
+================================================================================
+Named value definition
+================================================================================
+
+Person = { name: text }
+
+= Person
+
+--------------------------------------------------------------------------------
+
+(schema
+  (definition
+    (named_value
+      (identifier)
+      (object_value
+        (object_fields
+          (object_field
+            (object_label
+              (mandatory_label
+                (identifier)))
+            (text_value))))))
+  (root
+    (named_reference
+      (identifier))))
+
+================================================================================
+Import statement
+================================================================================
+
+common => import ./common.rengbis
+
+= common.person
+
+--------------------------------------------------------------------------------
+
+(schema
+  (definition
+    (import_statement
+      (identifier)
+      (import_path)))
+  (root
+    (scoped_reference
+      (identifier)
+      (identifier))))
+
+================================================================================
+Deprecated definition
+================================================================================
+
+@deprecated
+OldType = text
+
+= OldType
+
+--------------------------------------------------------------------------------
+
+(schema
+  (definition
+    (named_value
+      (deprecated_marker)
+      (identifier)
+      (text_value)))
+  (root
+    (named_reference
+      (identifier))))
+
+================================================================================
+Definition with doc comment
+================================================================================
+
+## This is a person type
+Person = { name: text }
+
+= Person
+
+--------------------------------------------------------------------------------
+
+(schema
+  (definition
+    (named_value
+      (doc_comment
+        (doc_comment_line))
+      (identifier)
+      (object_value
+        (object_fields
+          (object_field
+            (object_label
+              (mandatory_label
+                (identifier)))
+            (text_value))))))
+  (root
+    (named_reference
+      (identifier))))
