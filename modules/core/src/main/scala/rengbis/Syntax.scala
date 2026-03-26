@@ -18,23 +18,23 @@ object SchemaSyntax:
 
     val whitespaces: SchemaSyntax[Unit]  = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk(' '))
     val whitespaces0: SchemaSyntax[Unit] = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk())
-    // Regular comment: # not followed by # (to distinguish from ## doc comments)
+    // Regular comment: -- not followed by ! (to distinguish from --! doc comments)
     val comment: SchemaSyntax[Unit]      =
-        (Syntax.char('#') ~> Syntax.charNotIn('#') ~ Syntax.charNotIn('\n').repeat0).unit((' ', Chunk.empty))
-            <> Syntax.char('#').unit(())
+        (Syntax.string("--", ()) ~> Syntax.charNotIn('!') ~ Syntax.charNotIn('\n').repeat0).unit((' ', Chunk.empty))
+            <> Syntax.string("--", ()).unit(())
 
-    // Documentation comments: ## at start of line
+    // Documentation comments: --! at start of line
     val docCommentLine: SchemaSyntax[String]              = (
-        whitespaces0 ~ Syntax.string("##", ()) ~ whitespaces ~> Syntax.charNotIn('\n').repeat0.string <~ Syntax.char('\n')
+        whitespaces0 ~ Syntax.string("--!", ()) ~ whitespaces ~> Syntax.charNotIn('\n').repeat0.string <~ Syntax.char('\n')
     )
     val precedingDocComment: SchemaSyntax[Option[String]] = docCommentLine.repeat0.transform(
         lines => if lines.isEmpty then None else Some(lines.map(_.trim).mkString("\n")),
         doc => doc.map(s => Chunk.fromIterable(s.split("\n").toSeq)).getOrElse(Chunk.empty)
     )
 
-    // Trailing doc comment: ## at end of line (single line only)
+    // Trailing doc comment: --! at end of line (single line only)
     val trailingDocComment: SchemaSyntax[Option[String]] = (
-        whitespaces ~ Syntax.string("##", ()) ~ whitespaces0 ~> Syntax.charNotIn('\n').repeat0.string
+        whitespaces ~ Syntax.string("--!", ()) ~ whitespaces0 ~> Syntax.charNotIn('\n').repeat0.string
     ).optional.transform(
         opt => opt.map(_.trim).filter(_.nonEmpty),
         doc => doc
@@ -65,14 +65,14 @@ object SchemaSyntax:
         )
 
     val regexTextConstraint: SchemaSyntax[TextConstraint.Regex] = (
-        Syntax.string("regex", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString
+        Syntax.string("regex", ()) ~ Syntax.char(':') ~ whitespaces ~> quotedString
     ).transform(
         text => TextConstraint.Regex(text),
         c => c.pattern
     )
 
     val formatTextConstraint: SchemaSyntax[TextConstraint.Format] = (
-        Syntax.string("pattern", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> quotedString
+        Syntax.string("pattern", ()) ~ Syntax.char(':') ~ whitespaces ~> quotedString
     ).transform(
         text => TextConstraint.Format(text),
         c => c.format
@@ -159,7 +159,7 @@ object SchemaSyntax:
             <> Syntax.string("'ascii85'", BinaryConstraint.BinaryToTextEncoder.ascii85)
 
     val encodingConstraint: SchemaSyntax[BinaryConstraint.Encoding] = (
-        Syntax.string("encoding", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> binaryToTextEncoder
+        Syntax.string("encoding", ()) ~ Syntax.char(':') ~ whitespaces ~> binaryToTextEncoder
     ).transform(
         encoder => BinaryConstraint.Encoding(encoder),
         c => c.encoder
@@ -209,7 +209,7 @@ object SchemaSyntax:
     )
 
     val timeFormatConstraint: SchemaSyntax[TimeConstraint.Constraint] =
-        Syntax.string("format", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~> (
+        Syntax.string("format", ()) ~ Syntax.char(':') ~ whitespaces ~> (
             namedTimeFormat.as[TimeConstraint.Constraint] { case f: TimeConstraint.NamedFormat => f }
                 <> customTimePattern.as[TimeConstraint.Constraint] { case p: TimeConstraint.CustomPattern => p }
         )
@@ -351,7 +351,7 @@ object SchemaSyntax:
 
     val uniqueConstraint: SchemaSyntax[ListConstraint.Unique.type]            = Syntax.string("unique", ListConstraint.Unique)
     val uniqueByFieldsConstraint: SchemaSyntax[ListConstraint.UniqueByFields] = (
-        Syntax.string("unique", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~
+        Syntax.string("unique", ()) ~ Syntax.char(':') ~ whitespaces ~
             Syntax.char('(') ~ whitespaces ~
             label.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) ~
             whitespaces ~ Syntax.char(')')
@@ -360,7 +360,7 @@ object SchemaSyntax:
         c => Chunk.fromIterable(c.fields)
     )
     val uniqueByFieldConstraint: SchemaSyntax[ListConstraint.UniqueByFields]  = (
-        Syntax.string("unique", ()) ~ whitespaces ~ Syntax.char('=') ~ whitespaces ~ label
+        Syntax.string("unique", ()) ~ Syntax.char(':') ~ whitespaces ~ label
     ).transform(
         fieldName => ListConstraint.UniqueByFields(Seq(fieldName)),
         c => c.fields.head
@@ -442,7 +442,7 @@ object SchemaSyntax:
             <> tupleValues.asSchema { case t: Schema.TupleValue => t }
             <> item
 
-    // Root schema with optional doc comments (preceding ## lines and/or trailing ##)
+    // Root schema with optional doc comments (preceding --! lines and/or trailing --!)
     val root: SchemaSyntax[Schema] = (
         precedingDocComment ~ whitespaces0 ~ valueDefinition ~ trailingDocComment
     ).transform(

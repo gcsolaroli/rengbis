@@ -1,2 +1,2 @@
-# Map with number values (using … notation)
+-- Map with number values (using … notation)
 = { …: number }

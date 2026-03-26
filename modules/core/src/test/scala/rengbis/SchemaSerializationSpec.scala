@@ -21,8 +21,8 @@ object SchemaSerializationSpec extends ZIOSpecDefault:
             printTest(TextValue(textLength <= 100), "text [ length <= 100 ]"),
             printTest(TextValue(textLength > 10), "text [ length > 10 ]"),
             printTest(TextValue(textLength < 100), "text [ length < 100 ]"),
-            printTest(TextValue(TextConstraint.Regex("^[a-z]+$")), """text [ regex = "^[a-z]+$" ]"""),
-            printTest(TextValue(TextConstraint.Format("###-####")), """text [ pattern = "###-####" ]"""),
+            printTest(TextValue(TextConstraint.Regex("^[a-z]+$")), """text [ regex: "^[a-z]+$" ]"""),
+            printTest(TextValue(TextConstraint.Format("###-####")), """text [ pattern: "###-####" ]"""),
             printTest(TextValue(Seq.empty, Some("active")), """text ?= "active""""),
             printTest(TextValue(Seq(textLength <= 100), Some("default")), """text [ length <= 100 ] ?= "default"""")
         ),
@@ -35,17 +35,17 @@ object SchemaSerializationSpec extends ZIOSpecDefault:
             printTest(NumericValue(Seq(NumericConstraint.Integer), Some(BigDecimal(42))), "number [ integer ] ?= 42")
         ),
         suite("Binary with constraints")(
-            printTest(BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64)), "binary [ encoding = 'base64' ]"),
-            printTest(BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex)), "binary [ encoding = 'hex' ]"),
+            printTest(BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64)), "binary [ encoding: 'base64' ]"),
+            printTest(BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex)), "binary [ encoding: 'hex' ]"),
             printTest(BinaryValue(binBytes === 32), "binary [ bytes == 32 ]")
         ),
         suite("Time with constraints")(
-            printTest(TimeValue(TimeConstraint.NamedFormat.ISO8601), "time [ format = 'iso8601' ]"),
-            printTest(TimeValue(TimeConstraint.NamedFormat.ISO8601_Date), "time [ format = 'iso8601-date' ]"),
-            printTest(TimeValue(TimeConstraint.NamedFormat.ISO8601_Time), "time [ format = 'iso8601-time' ]"),
-            printTest(TimeValue(TimeConstraint.NamedFormat.RFC3339), "time [ format = 'rfc3339' ]"),
-            printTest(TimeValue(TimeConstraint.CustomPattern("yyyy-MM-dd")), """time [ format = "yyyy-MM-dd" ]"""),
-            printTest(TimeValue(TimeConstraint.CustomPattern("HH:mm:ss")), """time [ format = "HH:mm:ss" ]""")
+            printTest(TimeValue(TimeConstraint.NamedFormat.ISO8601), "time [ format: 'iso8601' ]"),
+            printTest(TimeValue(TimeConstraint.NamedFormat.ISO8601_Date), "time [ format: 'iso8601-date' ]"),
+            printTest(TimeValue(TimeConstraint.NamedFormat.ISO8601_Time), "time [ format: 'iso8601-time' ]"),
+            printTest(TimeValue(TimeConstraint.NamedFormat.RFC3339), "time [ format: 'rfc3339' ]"),
+            printTest(TimeValue(TimeConstraint.CustomPattern("yyyy-MM-dd")), """time [ format: "yyyy-MM-dd" ]"""),
+            printTest(TimeValue(TimeConstraint.CustomPattern("HH:mm:ss")), """time [ format: "HH:mm:ss" ]""")
         ),
         suite("Lists")(
             printTest(ListOfValues(TextValue()), "text*"),
@@ -77,7 +77,7 @@ object SchemaSerializationSpec extends ZIOSpecDefault:
         suite("Documentation comments")(
             printTest(
                 ObjectValue(Map(MandatoryLabel("name") -> Documented(Some("The name"), TextValue()))),
-                "{ ## The name\nname: text }"
+                "{ --! The name\nname: text }"
             ),
             test("roundtrip: object field with doc comment (normalized to object doc)"):
                 val schema   = ObjectValue(Map(MandatoryLabel("name") -> Documented(Some("The name"), TextValue())))

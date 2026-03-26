@@ -170,14 +170,14 @@ object ValidatorSpec extends ZIOSpecDefault:
             ,
             test("comments in schema"):
                 val schemaDefinition = """
-                    |# This is a comment at the top
+                    |-- This is a comment at the top
                     |= {
-                    |    name: text    # inline comment after field
+                    |    name: text    -- inline comment after field
                     |    age: number
-                    |    # comment on its own line
+                    |    -- comment on its own line
                     |    hobbies: text*
                     |}
-                    |# trailing comment
+                    |-- trailing comment
                     |""".stripMargin
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
@@ -199,7 +199,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("regex"):
-                val schemaDefinition = """= text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})" ]"""
+                val schemaDefinition = """= text [ regex: "([0-9]{4}-[0-9]{2}-[0-9]{2})" ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -210,7 +210,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("regex with length constraint"):
-                val schemaDefinition = """= text [ regex = "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 ]"""
+                val schemaDefinition = """= text [ regex: "([0-9]{4}-[0-9]{2}-[0-9]{2})", length == 10 ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -221,7 +221,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("email regex"):
-                val schemaDefinition = """= text [ regex = "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" ]"""
+                val schemaDefinition = """= text [ regex: "^[\w\-\.]+@([\w-]+\.)+[\w-]{2,}$" ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -232,7 +232,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("pattern"):
-                val schemaDefinition = """= text [ pattern = "{###-###-####}" ]"""
+                val schemaDefinition = """= text [ pattern: "{###-###-####}" ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -438,7 +438,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("object with single field key"):
-                val schemaDefinition = """= { id: text, name: text }* [ unique = id ]"""
+                val schemaDefinition = """= { id: text, name: text }* [ unique: id ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -451,7 +451,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("object with composite key"):
-                val schemaDefinition = """= { id: text, name: text }* [ unique = (id, name) ]"""
+                val schemaDefinition = """= { id: text, name: text }* [ unique: (id, name) ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -463,7 +463,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("multiple independent constraints"):
-                val schemaDefinition = """= { id: text, code: text, name: text }* [ unique = id, unique = code ]"""
+                val schemaDefinition = """= { id: text, code: text, name: text }* [ unique: id, unique: code ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -501,7 +501,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("base64 encoding"):
-                val schemaDefinition = """= binary [ encoding = 'base64' ]"""
+                val schemaDefinition = """= binary [ encoding: 'base64' ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -512,7 +512,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("hex encoding"):
-                val schemaDefinition = """= binary [ encoding = 'hex' ]"""
+                val schemaDefinition = """= binary [ encoding: 'hex' ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -525,7 +525,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("base32 encoding"):
-                val schemaDefinition = """= binary [ encoding = 'base32' ]"""
+                val schemaDefinition = """= binary [ encoding: 'base32' ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -535,7 +535,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("base64 with exact size"):
-                val schemaDefinition = """= binary [ encoding = 'base64', bytes == 11 ]"""
+                val schemaDefinition = """= binary [ encoding: 'base64', bytes == 11 ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -545,7 +545,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("base64 with size range"):
-                val schemaDefinition = """= binary [ encoding = 'base64', 5 <= bytes <= 20 ]"""
+                val schemaDefinition = """= binary [ encoding: 'base64', 5 <= bytes <= 20 ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -556,7 +556,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("in object field"):
-                val schemaDefinition = """= { name: text, data: binary [ encoding = 'base64' ] }"""
+                val schemaDefinition = """= { name: text, data: binary [ encoding: 'base64' ] }"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -609,7 +609,7 @@ object ValidatorSpec extends ZIOSpecDefault:
         ),
         suite("Time constraints")(
             test("iso8601 datetime"):
-                val schemaDefinition = """= time [ format = 'iso8601' ]"""
+                val schemaDefinition = """= time [ format: 'iso8601' ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -622,7 +622,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("iso8601-date"):
-                val schemaDefinition = """= time [ format = 'iso8601-date' ]"""
+                val schemaDefinition = """= time [ format: 'iso8601-date' ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -635,7 +635,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("iso8601-time"):
-                val schemaDefinition = """= time [ format = 'iso8601-time' ]"""
+                val schemaDefinition = """= time [ format: 'iso8601-time' ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -648,7 +648,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("custom pattern yyyy-MM-dd"):
-                val schemaDefinition = """= time [ format = "yyyy-MM-dd" ]"""
+                val schemaDefinition = """= time [ format: "yyyy-MM-dd" ]"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(
@@ -660,7 +660,7 @@ object ValidatorSpec extends ZIOSpecDefault:
                     case Left(value)   => assertTrue(value == ""))
             ,
             test("in object field"):
-                val schemaDefinition = """= { created: time [ format = 'iso8601' ], birthday: time [ format = 'iso8601-date' ] }"""
+                val schemaDefinition = """= { created: time [ format: 'iso8601' ], birthday: time [ format: 'iso8601-date' ] }"""
                 allSuccesses(parse(schemaDefinition) match
                     case Right(schema) =>
                         allSuccesses(

@@ -1,4 +1,4 @@
-# Expected: fully resolved schema for import-root.rengbis
+-- Expected: fully resolved schema for import-root.rengbis
 
 = {
     credentials: {

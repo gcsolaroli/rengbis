@@ -1,4 +1,4 @@
-# Imports a library that has a root schema
+-- Imports a library that has a root schema
 
 types => import ./types.rengbis
 

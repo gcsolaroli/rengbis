@@ -1,4 +1,4 @@
-# Imports a library and uses its definitions
+-- Imports a library and uses its definitions
 
 lib => import "common.rengbis"
 

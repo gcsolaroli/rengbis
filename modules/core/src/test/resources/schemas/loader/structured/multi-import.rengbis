@@ -1,4 +1,4 @@
-# Uses multiple imports
+-- Uses multiple imports
 
 lib => import "common.rengbis"
 types => import "types.rengbis"

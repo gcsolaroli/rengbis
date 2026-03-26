@@ -17,12 +17,12 @@ object SchemaSpec extends ZIOSpecDefault:
             parseTest("= number", NumericValue()),
             parseTest("= text", TextValue()),
             parseTest("= binary", BinaryValue()),
-            parseTest("= time [ format = 'iso8601' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601)),
-            parseTest("= time [ format = 'iso8601-date' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601_Date)),
-            parseTest("= time [ format = 'iso8601-time' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601_Time)),
-            parseTest("""= time [ format = "yyyy-MM-dd" ]""", TimeValue(TimeConstraint.CustomPattern("yyyy-MM-dd"))),
+            parseTest("= time [ format: 'iso8601' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601)),
+            parseTest("= time [ format: 'iso8601-date' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601_Date)),
+            parseTest("= time [ format: 'iso8601-time' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601_Time)),
+            parseTest("""= time [ format: "yyyy-MM-dd" ]""", TimeValue(TimeConstraint.CustomPattern("yyyy-MM-dd"))),
             test("invalid time pattern should be rejected"):
-                val result = parse("""= time [ format = "INVALID" ]""")
+                val result = parse("""= time [ format: "INVALID" ]""")
                 assertTrue(result.isLeft)
         ),
         suite("List types")(
@@ -82,19 +82,19 @@ object SchemaSpec extends ZIOSpecDefault:
             parseTest("""= number [ value >= 0.5 ]""", NumericValue(numValue >= BigDecimal("0.5")))
         ),
         suite("Binary constraints")(
-            parseTest("""= binary [ encoding = 'base64' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64))),
-            parseTest("""= binary [ encoding = 'hex' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex))),
+            parseTest("""= binary [ encoding: 'base64' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64))),
+            parseTest("""= binary [ encoding: 'hex' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex))),
             parseTest("""= binary [ bytes == 32 ]""", BinaryValue(binBytes === 32)),
             parseTest("""= binary [ bytes >= 16 ]""", BinaryValue(binBytes >= 16)),
             parseTest("""= binary [ bytes <= 256 ]""", BinaryValue(binBytes <= 256)),
             parseTest("""= binary [ 16 <= bytes <= 64 ]""", BinaryValue(binBytes >= 16, binBytes <= 64)),
             parseTest("""= binary [ 16 <= KB <= 64 ]""", BinaryValue(binBytes >= 16384, binBytes <= 65536)),
             parseTest(
-                """= binary [ encoding = 'base64', bytes == 32 ]""",
+                """= binary [ encoding: 'base64', bytes == 32 ]""",
                 BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64), binBytes === 32)
             ),
             parseTest(
-                """= binary [ encoding = 'hex', 8 <= bytes <= 64 ]""",
+                """= binary [ encoding: 'hex', 8 <= bytes <= 64 ]""",
                 BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex), binBytes >= 8, binBytes <= 64)
             )
         ),
@@ -116,18 +116,18 @@ object SchemaSpec extends ZIOSpecDefault:
             parseTest("""= text* [ unique, size == 3 ]""", ListOfValues(TextValue(), ListConstraint.Unique, listSize === 3)),
             parseTest("""= text* [ unique, 2 <= size <= 5 ]""", ListOfValues(TextValue(), ListConstraint.Unique, listSize >= 2, listSize <= 5)),
             parseTest(
-                """= { id: text }* [ unique = id ]""",
+                """= { id: text }* [ unique: id ]""",
                 ListOfValues(ObjectValue(Map(MandatoryLabel("id") -> TextValue())), ListConstraint.UniqueByFields(Seq("id")))
             ),
             parseTest(
-                """= { id: text, name: text }* [ unique = (id, name) ]""",
+                """= { id: text, name: text }* [ unique: (id, name) ]""",
                 ListOfValues(
                     ObjectValue(Map(MandatoryLabel("id") -> TextValue(), MandatoryLabel("name") -> TextValue())),
                     ListConstraint.UniqueByFields(Seq("id", "name"))
                 )
             ),
             parseTest(
-                """= { id: text, code: text }* [ unique = id, unique = code ]""",
+                """= { id: text, code: text }* [ unique: id, unique: code ]""",
                 ListOfValues(
                     ObjectValue(Map(MandatoryLabel("id") -> TextValue(), MandatoryLabel("code") -> TextValue())),
                     ListConstraint.UniqueByFields(Seq("id")),
@@ -367,7 +367,7 @@ object SchemaSpec extends ZIOSpecDefault:
         suite("Documentation comments")(
             test("preceding doc comment on object field"):
                 val schemaDefinition = """= {
-                    |    ## This is the name field
+                    |    --! This is the name field
                     |    name: text
                     |}""".stripMargin
                 assertTrue(
@@ -382,7 +382,7 @@ object SchemaSpec extends ZIOSpecDefault:
             ,
             test("trailing doc comment on object field"):
                 val schemaDefinition = """= {
-                    |    name: text  ## This is the name field
+                    |    name: text  --! This is the name field
                     |}""".stripMargin
                 assertTrue(
                     parse(schemaDefinition) == Right(
@@ -396,8 +396,8 @@ object SchemaSpec extends ZIOSpecDefault:
             ,
             test("multi-line preceding doc comment"):
                 val schemaDefinition = """= {
-                    |    ## This is the name field
-                    |    ## It contains the user's full name
+                    |    --! This is the name field
+                    |    --! It contains the user's full name
                     |    name: text
                     |}""".stripMargin
                 assertTrue(
@@ -412,9 +412,9 @@ object SchemaSpec extends ZIOSpecDefault:
             ,
             test("multiple fields with doc comments"):
                 val schemaDefinition = """= {
-                    |    ## The user's name
+                    |    --! The user's name
                     |    name: text
-                    |    ## The user's age
+                    |    --! The user's age
                     |    age: number
                     |}""".stripMargin
                 assertTrue(
@@ -431,7 +431,7 @@ object SchemaSpec extends ZIOSpecDefault:
             test("mixed doc comments - some fields documented, some not"):
                 val schemaDefinition = """
                     |= {
-                    |    ## Documented field
+                    |    --! Documented field
                     |    name: text
                     |    age: number
                     |}""".stripMargin
@@ -448,14 +448,14 @@ object SchemaSpec extends ZIOSpecDefault:
             ,
             test("doc comment on root schema"):
                 val schemaDefinition = """
-                    |## This is the root schema
+                    |--! This is the root schema
                     |= text
                     |""".stripMargin
                 assertTrue(parse(schemaDefinition) == Right(Documented(Some("This is the root schema"), TextValue())))
             ,
             test("doc comment on named value"):
                 val schemaDefinition = """
-                    |## Documentation for myType
+                    |--! Documentation for myType
                     |myType = number
                     |= myType""".stripMargin
                 val result           = SchemaLoader.parseSchema(schemaDefinition)
@@ -469,7 +469,7 @@ object SchemaSpec extends ZIOSpecDefault:
                 )
             ,
             test("trailing doc comment on root schema"):
-                val schemaDefinition = """= text  ## Root documentation"""
+                val schemaDefinition = """= text  --! Root documentation"""
                 assertTrue(
                     parse(schemaDefinition) == Right(
                         Documented(Some("Root documentation"), TextValue())
@@ -478,7 +478,7 @@ object SchemaSpec extends ZIOSpecDefault:
             ,
             test("trailing doc comment on root object schema"):
                 val schemaDefinition = """
-                    |= {    ## Root documentation
+                    |= {    --! Root documentation
                     |   name: text
                     |   value: number
                     |}""".stripMargin
@@ -501,7 +501,7 @@ object SchemaSpec extends ZIOSpecDefault:
                     |= {
                     |   name: text
                     |   value: number
-                    |} ## Root documentation""".stripMargin
+                    |} --! Root documentation""".stripMargin
                 assertTrue(
                     parse(schemaDefinition) == Right(
                         Documented(
@@ -518,7 +518,7 @@ object SchemaSpec extends ZIOSpecDefault:
             ,
             test("trailing doc comment on root object schema, take 3"):
                 val schemaDefinition = """
-                    |## Root documentation
+                    |--! Root documentation
                     |= {
                     |   name: text
                     |   value: number
@@ -565,7 +565,7 @@ object SchemaSpec extends ZIOSpecDefault:
             ,
             test("@deprecated with doc comment"):
                 val schemaDefinition = """= {
-                    |    ## This field is old
+                    |    --! This field is old
                     |    @deprecated oldField: text
                     |}""".stripMargin
                 assertTrue(
