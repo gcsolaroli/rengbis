@@ -2,7 +2,7 @@ package rengbis
 
 import zio.test.{ assertTrue, ZIOSpecDefault }
 
-import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, Deprecated, Documented, EnumValues, ListOfValues, MandatoryLabel, NumericValue, ObjectValue, Schema, TextValue, TimeValue, TupleValue }
+import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, Deprecated, Documented, EnumValues, ListOfValues, MandatoryLabel, NothingValue, NumericValue, ObjectValue, Schema, TextValue, TimeValue, TupleValue }
 import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint, TimeConstraint }
 import rengbis.testHelpers.{ binBytes, listSize, numValue, textLength }
 
@@ -13,6 +13,7 @@ object SchemaSpec extends ZIOSpecDefault:
     def spec = suite("Schema parsing features")(
         suite("Basic types")(
             parseTest("= any", AnyValue()),
+            parseTest("= nothing", NothingValue()),
             parseTest("= number", NumericValue()),
             parseTest("= text", TextValue()),
             parseTest("= binary", BinaryValue()),
@@ -32,6 +33,7 @@ object SchemaSpec extends ZIOSpecDefault:
         ),
         suite("Alternative types")(
             parseTest("= text | number", AlternativeValues(TextValue(), NumericValue())),
+            parseTest("= text | nothing", AlternativeValues(TextValue(), NothingValue())),
             parseTest("= text | number*", AlternativeValues(TextValue(), ListOfValues(NumericValue()))),
             parseTest("= text* | number", AlternativeValues(ListOfValues(TextValue()), NumericValue())),
             parseTest("= (text | number)*", ListOfValues(AlternativeValues(TextValue(), NumericValue()))),
@@ -152,6 +154,13 @@ object SchemaSpec extends ZIOSpecDefault:
                 assertTrue(parse(schemaDefinition) == Right(expectedSchema))
         ),
         suite("Named values")(
+            test("named value starting with 'nothing' prefix does not clash"):
+                val schemaDefinition = """
+                    |nothingness = number*
+                    |= nothingness
+                    |""".stripMargin
+                assertTrue(parse(schemaDefinition) == Right(ListOfValues(NumericValue())))
+            ,
             test("named value"):
                 val schemaDefinition = """
                     |foo = number*

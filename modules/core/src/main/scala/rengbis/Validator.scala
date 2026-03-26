@@ -2,7 +2,7 @@ package rengbis
 
 import java.nio.file.Path
 import zio.Chunk
-import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, Deprecated, Documented, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TimeValue, TupleValue }
+import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, Deprecated, Documented, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NothingValue, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TimeValue, TupleValue }
 import rengbis.Schema.{ BinaryConstraint, BoundOp, ListConstraint, NumericConstraint, TextConstraint, TimeConstraint }
 import rengbis.Schema.BinaryConstraint.BinaryToTextEncoder
 import rengbis.Schema.BinaryValue as SchemaBinaryValue
@@ -257,6 +257,10 @@ object Validator:
         case Deprecated(inner)               => validateValue(inner, value).withWarning(DeprecationWarning("Use of deprecated field"))
         case Fail()                          => ValidationResult.reportError(s"fail value")
         case AnyValue()                      => ValidationResult.valid
+        case NothingValue()                  =>
+            value match
+                case Value.NullValue() => ValidationResult.valid
+                case _                 => ValidationResult.reportError(s"expected nothing/null value; ${ value.valueTypeDescription } found [value: ${ value }]")
         case BooleanValue()                  =>
             value match
                 case Value.BooleanValue(value) => ValidationResult.valid

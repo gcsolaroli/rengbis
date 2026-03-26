@@ -1,22 +1,23 @@
 import scala.sys.process._
 
 ThisBuild / organization  := "rengbis"
-ThisBuild / scalaVersion  := "3.7.4"
-ThisBuild / usePipelining := true
+ThisBuild / scalaVersion  := "3.8.1"
+ThisBuild / usePipelining := false // pipelining causes warnings with Scala 3.8.x
 
 ThisBuild / scalacOptions ++= Seq(
     "-deprecation",
     "-feature",
     "-language:implicitConversions",
     "-unchecked",
-    "-Xfatal-warnings",
+    // "-Xfatal-warnings",
+    "-Werror",
     "-Xcheck-macros",
     "-Yexplicit-nulls", // experimental (I've seen it cause issues with circe)
     "-Xkind-projector",
     "-Wsafe-init"       // experimental (I've seen it cause issues with circe)
 ) ++ Seq("-rewrite", "-indent") ++ Seq("-source", "future")
 
-val RENGBIS_VERSION = "0.0.1"
+val RENGBIS_VERSION = "0.0.1-SNAPSHOT"
 
 val zio                   = "2.1.24"
 val zio_json              = "0.7.45"

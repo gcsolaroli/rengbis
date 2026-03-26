@@ -90,7 +90,7 @@ object SchemaSyntax:
     val textDefaultValue: SchemaSyntax[String] = whitespaces ~ Syntax.string("?=", ()) ~ whitespaces ~> quotedString
 
     val textValue: SchemaSyntax[Schema.TextValue] = (
-        Syntax.string("text", ()) ~ textConstraintBlock.optional ~ textDefaultValue.optional
+        keyword("text", ()) ~ textConstraintBlock.optional ~ textDefaultValue.optional
     ).transform(
         { case (constraints, default) => TextValue(constraints.getOrElse(Chunk()).toSeq, default) },
         textValue =>
@@ -100,8 +100,19 @@ object SchemaSyntax:
             )
     )
 
-    val anyValue: SchemaSyntax[Schema.AnyValue]             = Syntax.string("any", Schema.AnyValue())
-    val booleanValue: SchemaSyntax[Schema.BooleanValue]     = Syntax.string("boolean", Schema.BooleanValue())
+    // Keyword parser: matches a full identifier and checks it equals the expected keyword.
+    // This prevents keywords from matching as prefixes of longer identifiers
+    // (e.g., "nothing" must not match the prefix of "nothingness").
+    private def keyword[A](word: String, value: A): SchemaSyntax[A] =
+        (Syntax.letter ~ (Syntax.alphaNumeric <> Syntax.charIn("_-")).repeat0).string
+            .transformEither(
+                s => if s == word then Right(value) else Left(s"expected '$word'"),
+                _ => Right(word)
+            )
+
+    val anyValue: SchemaSyntax[Schema.AnyValue]             = keyword("any", Schema.AnyValue())
+    val nothingValue: SchemaSyntax[Schema.NothingValue]     = keyword("nothing", Schema.NothingValue())
+    val booleanValue: SchemaSyntax[Schema.BooleanValue]     = keyword("boolean", Schema.BooleanValue())
     val givenTextValue: SchemaSyntax[Schema.GivenTextValue] = quotedString.transform(s => Schema.GivenTextValue(s), v => v.value)
 
     val decimalNumber: SchemaSyntax[BigDecimal] = (
@@ -130,7 +141,7 @@ object SchemaSyntax:
     val numericDefaultValue: SchemaSyntax[BigDecimal] = whitespaces ~ Syntax.string("?=", ()) ~ whitespaces ~> decimalNumber
 
     val numericValue: SchemaSyntax[Schema.NumericValue] = (
-        Syntax.string("number", ()) ~ numericConstraintBlock.optional ~ numericDefaultValue.optional
+        keyword("number", ()) ~ numericConstraintBlock.optional ~ numericDefaultValue.optional
     ).transform(
         { case (constraints, default) => NumericValue(constraints.getOrElse(Chunk()).toSeq, default) },
         numericValue =>
@@ -176,7 +187,7 @@ object SchemaSyntax:
             <> encodingConstraint.as[BinaryConstraint.Constraint] { case e: BinaryConstraint.Encoding => e }.+
 
     val binaryValue: SchemaSyntax[Schema.BinaryValue] = (
-        Syntax.string("binary", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> binaryConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
+        keyword("binary", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> binaryConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
     ).transform(
         constraints => BinaryValue(constraints.map(_.flatMap(identity)).getOrElse(Chunk()).toList*),
         binaryValue => if binaryValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(binaryValue.constraints)))
@@ -211,7 +222,7 @@ object SchemaSyntax:
     ).transform(_.flatten, Chunk(_))
 
     val timeValue: SchemaSyntax[Schema.TimeValue] = (
-        Syntax.string("time", ()) ~ timeConstraintBlock.optional
+        keyword("time", ()) ~ timeConstraintBlock.optional
     ).transform(
         constraints => TimeValue(constraints.getOrElse(Chunk()).toList*),
         timeValue => if timeValue.constraints.isEmpty then None else Some(Chunk.fromIterable(timeValue.constraints))
@@ -324,6 +335,7 @@ object SchemaSyntax:
 
     val item: SchemaSyntax[Schema] =
         anyValue.asSchema { case a: Schema.AnyValue => a }
+            <> nothingValue.asSchema { case n: Schema.NothingValue => n }
             <> booleanValue.asSchema { case b: Schema.BooleanValue => b }
             <> numericValue.asSchema { case n: Schema.NumericValue => n }
             <> binaryValue.asSchema { case b: Schema.BinaryValue => b }

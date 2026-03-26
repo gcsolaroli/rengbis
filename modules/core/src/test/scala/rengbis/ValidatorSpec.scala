@@ -60,6 +60,51 @@ object ValidatorSpec extends ZIOSpecDefault:
                         )
                     case Left(value)   => assertTrue(value == ""))
         ),
+        suite("Nothing type")(
+            test("accepts null values"):
+                val schemaDefinition = """= nothing"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """null""").isValid),
+                            assertTrue(validateYamlString(schema, "null").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("rejects non-null values"):
+                val schemaDefinition = """= nothing"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """true""").isValid == false),
+                            assertTrue(validateJsonString(schema, """42""").isValid == false),
+                            assertTrue(validateJsonString(schema, """"text"""").isValid == false),
+                            assertTrue(validateJsonString(schema, """[]""").isValid == false),
+                            assertTrue(validateJsonString(schema, """{}""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("in nullable alternative (text | nothing)"):
+                val schemaDefinition = """= text | nothing"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """"hello"""").isValid),
+                            assertTrue(validateJsonString(schema, """null""").isValid),
+                            assertTrue(validateJsonString(schema, """42""").isValid == false)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+            ,
+            test("in object field"):
+                val schemaDefinition = """= { name: text, value: number | nothing }"""
+                allSuccesses(parse(schemaDefinition) match
+                    case Right(schema) =>
+                        allSuccesses(
+                            assertTrue(validateJsonString(schema, """{"name": "test", "value": 42}""").isValid),
+                            assertTrue(validateJsonString(schema, """{"name": "test", "value": null}""").isValid)
+                        )
+                    case Left(value)   => assertTrue(value == ""))
+        ),
         suite("Basic validation")(
             test("trivial Yaml values"):
                 allSuccesses(parse("""= "yes" | "no" """) match

@@ -105,6 +105,7 @@ object Schema:
 
     final case class Fail()         extends Schema
     final case class AnyValue()     extends Schema
+    final case class NothingValue() extends Schema
     final case class BooleanValue() extends Schema
 
     final case class TextValue(constraints: Seq[TextConstraint.Constraint] = Seq.empty, default: Option[String] = None) extends Schema

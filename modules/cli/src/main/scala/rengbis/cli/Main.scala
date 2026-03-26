@@ -65,8 +65,8 @@ object Main extends ZIOCliDefault:
     val command: Command[RengbisCommand] = buildCommand(Exists.Yes)
 
     val versionString: String =
-        val snapshot = if BuildInfo.gitDirty then " - SNAPSHOT" else ""
-        s"${ BuildInfo.version } [${ BuildInfo.gitCommit }$snapshot]"
+        val dirty = if BuildInfo.gitDirty then " - dirty" else ""
+        s"${ BuildInfo.version } [${ BuildInfo.gitCommit }$dirty]"
 
     val cliApp: CliApp[Any, Throwable, Unit] =
         CliApp.make(
