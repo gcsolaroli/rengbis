@@ -2,9 +2,8 @@ package rengbis
 
 import java.nio.file.Path
 import zio.Chunk
-import rengbis.Schema.{ AlternativeValues, AnyValue, BooleanValue, Deprecated, Documented, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NothingValue, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TimeValue, TupleValue }
-import rengbis.Schema.{ BinaryConstraint, BoundOp, ListConstraint, NumericConstraint, TextConstraint, TimeConstraint }
-import rengbis.Schema.BinaryConstraint.BinaryToTextEncoder
+import rengbis.Schema.{ AlternativeValues, Annotated, AnyValue, BooleanValue, Deprecated, Documented, EnumValues, Fail, GivenTextValue, ImportStatement, ListOfValues, MandatoryLabel, MapValue, NamedValueReference, NothingValue, NumericValue, ObjectValue, OptionalLabel, Schema, ScopedReference, TextValue, TimeValue, TupleValue }
+import rengbis.Schema.{ BinaryConstraint, BoundOp, ListConstraint, NumericConstraint, TextConstraint }
 import rengbis.Schema.BinaryValue as SchemaBinaryValue
 import scala.util.{ Failure, Success, Try }
 
@@ -82,61 +81,6 @@ object Validator:
                     case BoundOp.MaxExclusive => if value < bound.value then ValidationResult.valid else ValidationResult.reportError(s"maximum value constraint (< ${ bound.value }) not met: ${ value }")
 
     object BinaryValidation:
-        def decodeEncoding(encoder: BinaryToTextEncoder, text: String): Either[String, Chunk[Byte]] =
-            Try:
-                encoder match
-                    case BinaryToTextEncoder.base64  =>
-                        Chunk.fromArray(java.util.Base64.getDecoder.decode(text))
-                    case BinaryToTextEncoder.hex     =>
-                        val cleanHex = text.replaceAll("\\s", "")
-                        if cleanHex.length % 2 != 0 then throw new IllegalArgumentException("Hex string must have even length")
-                        Chunk.fromArray(cleanHex.grouped(2).map(Integer.parseInt(_, 16).toByte).toArray)
-                    case BinaryToTextEncoder.base32  =>
-                        val alphabet   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-                        val cleanInput = text.toUpperCase.replaceAll("\\s", "").replaceAll("=", "")
-                        val bits       = cleanInput.flatMap { c =>
-                            val idx = alphabet.indexOf(c)
-                            if idx < 0 then throw new IllegalArgumentException(s"Invalid base32 character: $c")
-                            (4 to 0 by -1).map(i => (idx >> i) & 1)
-                        }
-                        Chunk.fromArray(bits.grouped(8).filter(_.length == 8).map(_.foldLeft(0)((acc, b) => (acc << 1) | b).toByte).toArray)
-                    case BinaryToTextEncoder.base58  =>
-                        val alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-                        var num      = BigInt(0)
-                        for c <- text do
-                            val idx = alphabet.indexOf(c)
-                            if idx < 0 then throw new IllegalArgumentException(s"Invalid base58 character: $c")
-                            num = num * 58 + idx
-                        val bytes    = num.toByteArray
-                        val result   = if bytes.length > 1 && bytes(0) == 0 then bytes.tail else bytes
-                        Chunk.fromArray(result)
-                    case BinaryToTextEncoder.ascii85 =>
-                        val cleanInput = text.replaceAll("\\s", "")
-                        val input      =
-                            if cleanInput.startsWith("<~") && cleanInput.endsWith("~>")
-                            then cleanInput.drop(2).dropRight(2)
-                            else cleanInput
-                        val result     = scala.collection.mutable.ArrayBuffer[Byte]()
-                        var i          = 0
-                        while i < input.length do
-                            if input(i) == 'z' then
-                                result ++= Array[Byte](0, 0, 0, 0)
-                                i += 1
-                            else
-                                val chunk       = input.slice(i, i + 5).padTo(5, 'u')
-                                var value       = 0L
-                                for c <- chunk do
-                                    if c < '!' || c > 'u' then throw new IllegalArgumentException(s"Invalid ascii85 character: $c")
-                                    value = value * 85 + (c - '!')
-                                val bytesToTake = Math.min(4, input.length - i - 1).max(1)
-                                val bytes       = (0 until 4).map(j => ((value >> (24 - 8 * j)) & 0xff).toByte).toArray
-                                result ++= bytes.take(bytesToTake)
-                                i += Math.min(5, input.length - i)
-                        Chunk.fromArray(result.toArray)
-            match
-                case Success(bytes) => Right(bytes)
-                case Failure(e)     => Left(e.getMessage)
-
         def validateSizeConstraint(constraint: BinaryConstraint.Size, data: Chunk[Byte]): ValidationResult =
             val byteSize = data.length
             val bound    = constraint.bound
@@ -152,21 +96,6 @@ object Validator:
         def validateConstraints(constraints: Seq[BinaryConstraint.Constraint], data: Chunk[Byte]): ValidationResult =
             val sizeConstraints = constraints.collect { case c: BinaryConstraint.Size => c }
             ValidationResult.summarize(sizeConstraints.map(c => validateSizeConstraint(c, data)))
-
-    object TimeValidation:
-        import java.time.{ LocalDate, LocalTime }
-
-        def validateFormatConstraint(formatConstraint: TimeConstraint.FormatConstraint, text: String): ValidationResult =
-            Try(LocalTime.parse(text, formatConstraint.formatter))
-                // .orElse(Try(OffsetDateTime.parse(text, formatConstraint.formatter)))
-                // .orElse(Try(LocalDateTime.parse(text, formatConstraint.formatter)))
-                // .orElse(Try(ZonedDateTime.parse(text, formatConstraint.formatter)))
-                .orElse(Try(LocalDate.parse(text, formatConstraint.formatter))) match
-                case Success(_) => ValidationResult.valid
-                case Failure(e) => ValidationResult.reportError(s"time format ${ formatConstraint.name } not matching: ${ e.getMessage }")
-
-        def validateConstraints(constraint: TimeConstraint.Constraint, text: String): ValidationResult = constraint match
-            case fc: TimeConstraint.FormatConstraint => validateFormatConstraint(fc, text)
 
     object ListValidation:
         def validateConstraints(constraint: ListConstraint.Constraint, list: Chunk[Value], itemSchema: Schema): ValidationResult =
@@ -255,6 +184,7 @@ object Validator:
     def validateValue(schema: Schema, value: Value): ValidationResult = schema match
         case Documented(_, inner)            => validateValue(inner, value)
         case Deprecated(inner)               => validateValue(inner, value).withWarning(DeprecationWarning("Use of deprecated field"))
+        case Annotated(_, inner)             => validateValue(inner, value)
         case Fail()                          => ValidationResult.reportError(s"fail value")
         case AnyValue()                      => ValidationResult.valid
         case NothingValue()                  =>
@@ -285,19 +215,13 @@ object Validator:
             value match
                 case Value.BinaryValue(data) =>
                     BinaryValidation.validateConstraints(constraints, data)
-                case Value.TextValue(text)   =>
-                    constraints.collectFirst { case BinaryConstraint.Encoding(enc) => enc } match
-                        case Some(encoding) =>
-                            BinaryValidation.decodeEncoding(encoding, text) match
-                                case Right(bytes) => BinaryValidation.validateConstraints(constraints, bytes)
-                                case Left(error)  => ValidationResult.reportError(s"Failed to decode $encoding: $error")
-                        case None           =>
-                            ValidationResult.valid
+                case Value.TextValue(_)      =>
+                    ValidationResult.valid
                 case _                       => ValidationResult.reportError(s"expected binary value; ${ value.valueTypeDescription } found [value: ${ value }]")
-        case TimeValue(constraints*)         =>
+        case TimeValue()                     =>
             value match
-                case Value.TextValue(text) => ValidationResult.summarize(constraints.map(c => TimeValidation.validateConstraints(c, text)))
-                case _                     => ValidationResult.reportError(s"expected time value (as text); ${ value.valueTypeDescription } found [value: ${ value }]")
+                case Value.TextValue(_) => ValidationResult.valid
+                case _                  => ValidationResult.reportError(s"expected time value (as text); ${ value.valueTypeDescription } found [value: ${ value }]")
         case EnumValues(values*)             =>
             value match
                 case Value.TextValue(value) => if (values.contains(value)) then ValidationResult.valid else ValidationResult.reportError(s"enum type does not include provided value: '${ value }'")

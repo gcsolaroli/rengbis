@@ -2,8 +2,8 @@ package rengbis
 
 import zio.test.{ assertTrue, ZIOSpecDefault }
 
-import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, Deprecated, Documented, EnumValues, ListOfValues, MandatoryLabel, NothingValue, NumericValue, ObjectValue, Schema, TextValue, TimeValue, TupleValue }
-import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint, TimeConstraint }
+import rengbis.Schema.{ AlternativeValues, Annotated, AnyValue, BinaryValue, Deprecated, Documented, EnumValues, ListOfValues, MandatoryLabel, NothingValue, NumericValue, ObjectValue, Schema, TextValue, TimeValue, TupleValue }
+import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint }
 import rengbis.testHelpers.{ binBytes, listSize, numValue, textLength }
 
 object SchemaSpec extends ZIOSpecDefault:
@@ -17,13 +17,7 @@ object SchemaSpec extends ZIOSpecDefault:
             parseTest("= number", NumericValue()),
             parseTest("= text", TextValue()),
             parseTest("= binary", BinaryValue()),
-            parseTest("= time [ format: 'iso8601' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601)),
-            parseTest("= time [ format: 'iso8601-date' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601_Date)),
-            parseTest("= time [ format: 'iso8601-time' ]", TimeValue(TimeConstraint.NamedFormat.ISO8601_Time)),
-            parseTest("""= time [ format: "yyyy-MM-dd" ]""", TimeValue(TimeConstraint.CustomPattern("yyyy-MM-dd"))),
-            test("invalid time pattern should be rejected"):
-                val result = parse("""= time [ format: "INVALID" ]""")
-                assertTrue(result.isLeft)
+            parseTest("= time", TimeValue())
         ),
         suite("List types")(
             parseTest("= number*", ListOfValues(NumericValue())),
@@ -82,21 +76,13 @@ object SchemaSpec extends ZIOSpecDefault:
             parseTest("""= number [ value >= 0.5 ]""", NumericValue(numValue >= BigDecimal("0.5")))
         ),
         suite("Binary constraints")(
-            parseTest("""= binary [ encoding: 'base64' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64))),
-            parseTest("""= binary [ encoding: 'hex' ]""", BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex))),
             parseTest("""= binary [ bytes == 32 ]""", BinaryValue(binBytes === 32)),
             parseTest("""= binary [ bytes >= 16 ]""", BinaryValue(binBytes >= 16)),
             parseTest("""= binary [ bytes <= 256 ]""", BinaryValue(binBytes <= 256)),
             parseTest("""= binary [ 16 <= bytes <= 64 ]""", BinaryValue(binBytes >= 16, binBytes <= 64)),
             parseTest("""= binary [ 16 <= KB <= 64 ]""", BinaryValue(binBytes >= 16384, binBytes <= 65536)),
-            parseTest(
-                """= binary [ encoding: 'base64', bytes == 32 ]""",
-                BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64), binBytes === 32)
-            ),
-            parseTest(
-                """= binary [ encoding: 'hex', 8 <= bytes <= 64 ]""",
-                BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex), binBytes >= 8, binBytes <= 64)
-            )
+            parseTest("""= binary [ bytes == 32 ]""", BinaryValue(binBytes === 32)),
+            parseTest("""= binary [ 8 <= bytes <= 64 ]""", BinaryValue(binBytes >= 8, binBytes <= 64))
         ),
         suite("List constraints")(
             parseTest("""= text* [ size == 10 ]""", ListOfValues(TextValue(), listSize === 10)),
@@ -577,5 +563,73 @@ object SchemaSpec extends ZIOSpecDefault:
                         )
                     )
                 )
+        ),
+        suite("Format annotations")(
+            test("simple annotation on root"):
+                val schemaDefinition = """= time  --# format: iso8601"""
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        Annotated(FormatAnnotation.Annotations(Map("format" -> "iso8601")), TimeValue())
+                    )
+                )
+            ,
+            test("annotation with constraints"):
+                val schemaDefinition = """= binary [ bytes == 32 ]  --# encoding: base64"""
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        Annotated(
+                            FormatAnnotation.Annotations(Map("encoding" -> "base64")),
+                            BinaryValue(BinaryConstraint.Size(Schema.BoundConstraint(Schema.BoundOp.Exact, 32), BinaryConstraint.BinaryUnit.bytes))
+                        )
+                    )
+                )
+            ,
+            test("multiple annotations"):
+                val schemaDefinition = """= time  --# format: iso8601, timezone: UTC"""
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        Annotated(FormatAnnotation.Annotations(Map("format" -> "iso8601", "timezone" -> "UTC")), TimeValue())
+                    )
+                )
+            ,
+            test("annotation on object field"):
+                val schemaDefinition = """= {
+                    |    timestamp: time  --# format: iso8601
+                    |    name: text
+                    |}""".stripMargin
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        ObjectValue(
+                            Map(
+                                MandatoryLabel("timestamp") -> Annotated(FormatAnnotation.Annotations(Map("format" -> "iso8601")), TimeValue()),
+                                MandatoryLabel("name")      -> TextValue()
+                            )
+                        )
+                    )
+                )
+            ,
+            test("annotation on named value"):
+                val schemaDefinition = """
+                    |ts = time  --# format: iso8601
+                    |= ts""".stripMargin
+                val result = SchemaLoader.parseSchema(schemaDefinition)
+                assertTrue(
+                    result.isRight &&
+                        result.toOption.get.definitions
+                            .get("ts")
+                            .contains(Annotated(FormatAnnotation.Annotations(Map("format" -> "iso8601")), TimeValue()))
+                )
+            ,
+            test("annotation with doc comment"):
+                val schemaDefinition = """= time  --# format: iso8601  --! The timestamp"""
+                assertTrue(
+                    parse(schemaDefinition) == Right(
+                        Documented(Some("The timestamp"), Annotated(FormatAnnotation.Annotations(Map("format" -> "iso8601")), TimeValue()))
+                    )
+                )
+            ,
+            test("no annotation produces no wrapper"):
+                val schemaDefinition = """= number"""
+                assertTrue(parse(schemaDefinition) == Right(NumericValue()))
         )
     )

@@ -2,8 +2,8 @@ package rengbis
 
 import zio.Chunk
 import zio.parser.{ AnySyntaxOps, Parser, ParserOps, Printer, StringErrSyntaxOps, StringParserError, Syntax, SyntaxOps }
-import Schema.{ AlternativeValues, BinaryValue, Deprecated, Documented, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue, TimeValue }
-import Schema.{ BinaryConstraint, BoundConstraint, BoundOp, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint, TimeConstraint }
+import Schema.{ AlternativeValues, Annotated, BinaryValue, Deprecated, Documented, EnumValues, ImportStatement, MandatoryLabel, NamedValueReference, NumericValue, ObjectLabel, OptionalLabel, Schema, ScopedReference, TextValue, TimeValue }
+import Schema.{ BinaryConstraint, BoundConstraint, BoundOp, GivenTextValue, ListConstraint, NumericConstraint, TextConstraint }
 
 object SchemaSyntax:
     import Extensions.*
@@ -18,9 +18,9 @@ object SchemaSyntax:
 
     val whitespaces: SchemaSyntax[Unit]  = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk(' '))
     val whitespaces0: SchemaSyntax[Unit] = Syntax.charIn(' ', '\t', '\r').*.unit(Chunk())
-    // Regular comment: -- not followed by ! (to distinguish from --! doc comments)
+    // Regular comment: -- not followed by ! or # (to distinguish from --! doc comments and --# annotations)
     val comment: SchemaSyntax[Unit]      =
-        (Syntax.string("--", ()) ~> Syntax.charNotIn('!') ~ Syntax.charNotIn('\n').repeat0).unit((' ', Chunk.empty))
+        (Syntax.string("--", ()) ~> Syntax.charNotIn('!', '#') ~ Syntax.charNotIn('\n').repeat0).unit((' ', Chunk.empty))
             <> Syntax.string("--", ()).unit(())
 
     // Documentation comments: --! at start of line
@@ -39,6 +39,25 @@ object SchemaSyntax:
         opt => opt.map(_.trim).filter(_.nonEmpty),
         doc => doc
     )
+
+    // Format annotations: --# key: value, key2: value2 (trailing only)
+    lazy val annotationValue: SchemaSyntax[String] =
+        (Syntax.alphaNumeric <> Syntax.charIn("-._+:")).repeat.string
+
+    lazy val annotationEntry: SchemaSyntax[(String, String)] = (
+        label <~ Syntax.char(':') <~ whitespaces) ~ annotationValue
+
+    lazy val trailingAnnotation: SchemaSyntax[Option[FormatAnnotation.Annotations]] = (
+        whitespaces ~ Syntax.string("--#", ()) ~ whitespaces0 ~>
+            annotationEntry.repeatWithSep(Syntax.char(',') ~ whitespaces)
+    ).optional.transform(
+        opt => opt.map(entries => FormatAnnotation.Annotations(entries.toMap)),
+        ann => ann.filter(!_.isEmpty).map(a => Chunk.fromIterable(a.entries.toSeq))
+    )
+
+    // Combined trailing metadata: annotations and doc comments in either order
+    lazy val trailingMetadata: SchemaSyntax[(Option[FormatAnnotation.Annotations], Option[String])] =
+        (trailingAnnotation ~ trailingDocComment)
 
     val deprecatedMarker: SchemaSyntax[Boolean] = (Syntax.string("@deprecated", ()) ~ whitespaces).optional
         .transform(
@@ -151,20 +170,6 @@ object SchemaSyntax:
             )
     )
 
-    val binaryToTextEncoder: SchemaSyntax[BinaryConstraint.BinaryToTextEncoder] =
-        Syntax.string("'hex'", BinaryConstraint.BinaryToTextEncoder.hex)
-            <> Syntax.string("'base64'", BinaryConstraint.BinaryToTextEncoder.base64)
-            <> Syntax.string("'base32'", BinaryConstraint.BinaryToTextEncoder.base32)
-            <> Syntax.string("'base58'", BinaryConstraint.BinaryToTextEncoder.base58)
-            <> Syntax.string("'ascii85'", BinaryConstraint.BinaryToTextEncoder.ascii85)
-
-    val encodingConstraint: SchemaSyntax[BinaryConstraint.Encoding] = (
-        Syntax.string("encoding", ()) ~ Syntax.char(':') ~ whitespaces ~> binaryToTextEncoder
-    ).transform(
-        encoder => BinaryConstraint.Encoding(encoder),
-        c => c.encoder
-    )
-
     val sizeBinaryUnit: SchemaSyntax[BinaryConstraint.BinaryUnit] =
         Syntax.string("bytes", BinaryConstraint.BinaryUnit.bytes)
             <> Syntax.string("bits", BinaryConstraint.BinaryUnit.bytes)
@@ -184,7 +189,6 @@ object SchemaSyntax:
 
     val binaryConstraints: SchemaSyntax[Chunk[BinaryConstraint.Constraint]] =
         sizeBinaryConstraints.asChunkOf[BinaryConstraint.Constraint] { case s: BinaryConstraint.Size => s }
-            <> encodingConstraint.as[BinaryConstraint.Constraint] { case e: BinaryConstraint.Encoding => e }.+
 
     val binaryValue: SchemaSyntax[Schema.BinaryValue] = (
         keyword("binary", ()) ~ (whitespaces ~ Syntax.char('[') ~ whitespaces ~> binaryConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')).optional
@@ -193,40 +197,7 @@ object SchemaSyntax:
         binaryValue => if binaryValue.constraints.isEmpty then None else Some(Chunk(Chunk.fromIterable(binaryValue.constraints)))
     )
 
-    val namedTimeFormat: SchemaSyntax[TimeConstraint.NamedFormat] =
-        Syntax.string("'iso8601'", TimeConstraint.NamedFormat.ISO8601)
-            <> Syntax.string("'iso8601-datetime'", TimeConstraint.NamedFormat.ISO8601_DateTime)
-            <> Syntax.string("'iso8601-date'", TimeConstraint.NamedFormat.ISO8601_Date)
-            <> Syntax.string("'iso8601-time'", TimeConstraint.NamedFormat.ISO8601_Time)
-            <> Syntax.string("'rfc3339'", TimeConstraint.NamedFormat.RFC3339)
-
-    val customTimePattern: SchemaSyntax[TimeConstraint.CustomPattern] = quotedString.transformEither(
-        pattern =>
-            try Right(TimeConstraint.CustomPattern(pattern))
-            catch case e: IllegalArgumentException => Left(s"Invalid time pattern '$pattern': ${ e.getMessage }"),
-
-        c => Right(c.pattern)
-    )
-
-    val timeFormatConstraint: SchemaSyntax[TimeConstraint.Constraint] =
-        Syntax.string("format", ()) ~ Syntax.char(':') ~ whitespaces ~> (
-            namedTimeFormat.as[TimeConstraint.Constraint] { case f: TimeConstraint.NamedFormat => f }
-                <> customTimePattern.as[TimeConstraint.Constraint] { case p: TimeConstraint.CustomPattern => p }
-        )
-
-    val timeConstraints: SchemaSyntax[Chunk[TimeConstraint.Constraint]] =
-        timeFormatConstraint.+
-
-    val timeConstraintBlock: SchemaSyntax[Chunk[TimeConstraint.Constraint]] = (
-        whitespaces ~ Syntax.char('[') ~ whitespaces ~> timeConstraints.repeatWithSep(whitespaces ~ Syntax.char(',') ~ whitespaces) <~ whitespaces ~ Syntax.char(']')
-    ).transform(_.flatten, Chunk(_))
-
-    val timeValue: SchemaSyntax[Schema.TimeValue] = (
-        keyword("time", ()) ~ timeConstraintBlock.optional
-    ).transform(
-        constraints => TimeValue(constraints.getOrElse(Chunk()).toList*),
-        timeValue => if timeValue.constraints.isEmpty then None else Some(Chunk.fromIterable(timeValue.constraints))
-    )
+    val timeValue: SchemaSyntax[Schema.TimeValue] = keyword("time", Schema.TimeValue())
 
     val label: SchemaSyntax[String] = (Syntax.letter ~ (Syntax.alphaNumeric <> Syntax.charIn("_-")).repeat0).string
 
@@ -247,21 +218,22 @@ object SchemaSyntax:
     val valueDefinition: SchemaSyntax[Schema] = Syntax.char('=') ~ whitespaces ~ items
 
     val namedValue: SchemaSyntax[(String, Schema)] = (
-        precedingDocComment ~ whitespaces0 ~ deprecatedMarker ~ label ~ whitespaces ~ valueDefinition ~ trailingDocComment
+        precedingDocComment ~ whitespaces0 ~ deprecatedMarker ~ label ~ whitespaces ~ valueDefinition ~ trailingMetadata
     ).transform(
-        { case (precedingDoc, isDeprecated, name, schema, trailingDoc) =>
+        { case (precedingDoc, isDeprecated, name, schema, (annotations, trailingDoc)) =>
             val doc          = Documentation.combineDoc(precedingDoc, trailingDoc)
-            val withDoc      = schema.withDoc(doc)
+            val withDoc      = schema.withAnnotations(annotations).withDoc(doc)
             val withMetadata = if isDeprecated then withDoc.asDeprecated else withDoc
             (name, withMetadata)
         },
         { case (name, schema) =>
-            def unwrap(s: Schema): (Option[String], Boolean, Schema) = s match
-                case Deprecated(inner)      => val (doc, _, s) = unwrap(inner); (doc, true, s)
-                case Documented(doc, inner) => (doc, false, inner)
-                case _                      => (None, false, s)
-            val (doc, isDeprecated, inner)                           = unwrap(schema)
-            (doc, isDeprecated, name, inner, None)
+            def unwrap(s: Schema): (Option[String], Boolean, Option[FormatAnnotation.Annotations], Schema) = s match
+                case Deprecated(inner)         => val (doc, _, ann, s) = unwrap(inner); (doc, true, ann, s)
+                case Documented(doc, inner)    => val (_, dep, ann, s) = unwrap(inner); (doc, dep, ann, s)
+                case Annotated(ann, inner)     => val (doc, dep, _, s) = unwrap(inner); (doc, dep, Some(ann), s)
+                case _                         => (None, false, None, s)
+            val (doc, isDeprecated, ann, inner) = unwrap(schema)
+            (doc, isDeprecated, name, inner, (ann, None))
         }
     )
 
@@ -293,21 +265,22 @@ object SchemaSyntax:
     )
 
     val objectField: SchemaSyntax[(ObjectLabel, Schema)] = (
-        precedingDocComment ~ whitespaces0 ~ deprecatedMarker ~ objectLabel ~ Syntax.char(':') ~ whitespaces ~ items ~ trailingDocComment
+        precedingDocComment ~ whitespaces0 ~ deprecatedMarker ~ objectLabel ~ Syntax.char(':') ~ whitespaces ~ items ~ trailingMetadata
     ).transform(
-        { case (precedingDoc, isDeprecated, label, schema, trailingDoc) =>
+        { case (precedingDoc, isDeprecated, label, schema, (annotations, trailingDoc)) =>
             val doc          = Documentation.combineDoc(precedingDoc, trailingDoc)
-            val withDoc      = schema.withDoc(doc)
+            val withDoc      = schema.withAnnotations(annotations).withDoc(doc)
             val withMetadata = if isDeprecated then withDoc.asDeprecated else withDoc
             (label, withMetadata)
         },
         { case (label, schema) =>
-            def unwrap(s: Schema): (Option[String], Boolean, Schema) = s match
-                case Deprecated(inner)      => val (doc, _, s) = unwrap(inner); (doc, true, s)
-                case Documented(doc, inner) => (doc, false, inner)
-                case _                      => (None, false, s)
-            val (doc, isDeprecated, inner)                           = unwrap(schema)
-            (doc, isDeprecated, label, inner, None)
+            def unwrap(s: Schema): (Option[String], Boolean, Option[FormatAnnotation.Annotations], Schema) = s match
+                case Deprecated(inner)         => val (doc, _, ann, s) = unwrap(inner); (doc, true, ann, s)
+                case Documented(doc, inner)    => val (_, dep, ann, s) = unwrap(inner); (doc, dep, ann, s)
+                case Annotated(ann, inner)     => val (doc, dep, _, s) = unwrap(inner); (doc, dep, Some(ann), s)
+                case _                         => (None, false, None, s)
+            val (doc, isDeprecated, ann, inner) = unwrap(schema)
+            (doc, isDeprecated, label, inner, (ann, None))
         }
     )
 
@@ -442,18 +415,21 @@ object SchemaSyntax:
             <> tupleValues.asSchema { case t: Schema.TupleValue => t }
             <> item
 
-    // Root schema with optional doc comments (preceding --! lines and/or trailing --!)
+    // Root schema with optional doc comments (preceding --! lines and/or trailing --!/--#)
     val root: SchemaSyntax[Schema] = (
-        precedingDocComment ~ whitespaces0 ~ valueDefinition ~ trailingDocComment
+        precedingDocComment ~ whitespaces0 ~ valueDefinition ~ trailingMetadata
     ).transform(
-        { case (precedingDoc, schema, trailingDoc) =>
+        { case (precedingDoc, schema, (annotations, trailingDoc)) =>
             val doc = Documentation.combineDoc(precedingDoc, trailingDoc)
-            schema.withDoc(doc)
+            schema.withAnnotations(annotations).withDoc(doc)
         },
         schema =>
-            schema match
-                case Documented(doc, inner) => (doc, inner, None)
-                case _                      => (None, schema, None)
+            def unwrap(s: Schema): (Option[String], Option[FormatAnnotation.Annotations], Schema) = s match
+                case Documented(doc, inner) => val (_, ann, s) = unwrap(inner); (doc, ann, s)
+                case Annotated(ann, inner)  => val (doc, _, s) = unwrap(inner); (doc, Some(ann), s)
+                case _                      => (None, None, s)
+            val (doc, ann, inner) = unwrap(schema)
+            (doc, inner, (ann, None))
     )
 
     val definition: SchemaSyntax[(String, Schema)] = importStatement <> namedValue

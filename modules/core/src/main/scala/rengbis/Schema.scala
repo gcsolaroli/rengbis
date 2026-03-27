@@ -51,8 +51,6 @@ object Schema:
             case base58  extends BinaryToTextEncoder("base58")
             case ascii85 extends BinaryToTextEncoder("ascii85")
 
-        case class Encoding(encoder: BinaryToTextEncoder) extends Constraint
-
         enum BinaryUnit(val symbol: String, val bytes: Integer):
             case bytes extends BinaryUnit("bytes", 1)
             case KB    extends BinaryUnit("KB", 1024)
@@ -60,24 +58,6 @@ object Schema:
             case GB    extends BinaryUnit("GB", 1024 * 1024 * 1024)
 
         case class Size(bound: BoundConstraint[Int], unit: BinaryUnit) extends Constraint
-
-    object TimeConstraint:
-        sealed abstract class Constraint
-
-        sealed abstract class FormatConstraint extends Constraint:
-            def formatter: java.time.format.DateTimeFormatter
-            def name: String
-
-        enum NamedFormat(val name: String, val formatter: java.time.format.DateTimeFormatter) extends FormatConstraint:
-            case ISO8601          extends NamedFormat("iso8601", java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-            case ISO8601_DateTime extends NamedFormat("iso8601.datetime", java.time.format.DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-            case ISO8601_Date     extends NamedFormat("iso8601.date", java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
-            case ISO8601_Time     extends NamedFormat("iso8601.time", java.time.format.DateTimeFormatter.ISO_LOCAL_TIME)
-            case RFC3339          extends NamedFormat("rcf3339", java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME)
-
-        case class CustomPattern(pattern: String) extends FormatConstraint:
-            val formatter: java.time.format.DateTimeFormatter = java.time.format.DateTimeFormatter.ofPattern(pattern)
-            val name                                          = "custom"
 
     // ------------------------------------------------------------------------
 
@@ -87,10 +67,13 @@ object Schema:
         def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] = Right(this)
         def dependencies: Seq[String]                                                   = Seq.empty
 
-        def withDoc(documentation: Option[String]): Schema = documentation match
+        def withDoc(documentation: Option[String]): Schema              = documentation match
             case Some(d) => Documented(Some(d), this)
             case None    => this
-        def asDeprecated: Schema                           = Deprecated(this)
+        def asDeprecated: Schema                                       = Deprecated(this)
+        def withAnnotations(annotations: Option[FormatAnnotation.Annotations]): Schema = annotations match
+            case Some(a) if !a.isEmpty => Annotated(a, this)
+            case _                     => this
 
     final case class Documented(override val doc: Option[String], schema: Schema) extends Schema:
         override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
@@ -101,6 +84,11 @@ object Schema:
         override val deprecated: Boolean                                                         = true
         override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
             schema.replaceReferencedValues(context*).map(s => Deprecated(s))
+        override def dependencies: Seq[String]                                                   = schema.dependencies
+
+    final case class Annotated(annotations: FormatAnnotation.Annotations, schema: Schema) extends Schema:
+        override def replaceReferencedValues(context: (String, Schema)*): Either[String, Schema] =
+            schema.replaceReferencedValues(context*).map(s => Annotated(annotations, s))
         override def dependencies: Seq[String]                                                   = schema.dependencies
 
     final case class Fail()         extends Schema
@@ -120,7 +108,7 @@ object Schema:
 
     final case class BinaryValue(constraints: BinaryConstraint.Constraint*) extends Schema
 
-    final case class TimeValue(constraints: TimeConstraint.Constraint*) extends Schema
+    final case class TimeValue() extends Schema
 
     final case class EnumValues(values: String*) extends Schema
 

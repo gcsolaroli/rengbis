@@ -63,7 +63,8 @@ object DataParsers:
     def text(file: Path): Validator   = text(Files.readString(file))
     def text(text: String): Validator = (schema: Schema) => Right(rengbis.Value.TextValue(text)).flatMap(validateValue(schema))
 
-    protected def validateValue(schema: Schema)(value: Value): Either[String, Value] = Validator.validateValue(schema, value).toEither.map(_ => value)
+    protected def validateValue(schema: Schema)(value: Value): Either[String, Value] =
+        Interpreter.coerce(schema, value).flatMap(coerced => Validator.validateValue(schema, coerced).toEither.map(_ => coerced))
 
     private def fromJson(json: Json): Value = json match
         case Bool(value)   => Value.BooleanValue(value)

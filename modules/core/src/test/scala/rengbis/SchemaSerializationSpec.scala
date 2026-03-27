@@ -2,7 +2,7 @@ package rengbis
 
 import zio.test.{ assertTrue, ZIOSpecDefault }
 import rengbis.Schema.{ AlternativeValues, AnyValue, BinaryValue, BooleanValue, Deprecated, Documented, EnumValues, GivenTextValue, ListOfValues, MandatoryLabel, MapValue, NumericValue, ObjectValue, OptionalLabel, Schema, TextValue, TimeValue, TupleValue }
-import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint, TimeConstraint }
+import rengbis.Schema.{ BinaryConstraint, ListConstraint, NumericConstraint, TextConstraint }
 import rengbis.testHelpers.{ binBytes, listSize, numValue, textLength }
 
 object SchemaSerializationSpec extends ZIOSpecDefault:
@@ -35,17 +35,10 @@ object SchemaSerializationSpec extends ZIOSpecDefault:
             printTest(NumericValue(Seq(NumericConstraint.Integer), Some(BigDecimal(42))), "number [ integer ] ?= 42")
         ),
         suite("Binary with constraints")(
-            printTest(BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.base64)), "binary [ encoding: 'base64' ]"),
-            printTest(BinaryValue(BinaryConstraint.Encoding(BinaryConstraint.BinaryToTextEncoder.hex)), "binary [ encoding: 'hex' ]"),
             printTest(BinaryValue(binBytes === 32), "binary [ bytes == 32 ]")
         ),
-        suite("Time with constraints")(
-            printTest(TimeValue(TimeConstraint.NamedFormat.ISO8601), "time [ format: 'iso8601' ]"),
-            printTest(TimeValue(TimeConstraint.NamedFormat.ISO8601_Date), "time [ format: 'iso8601-date' ]"),
-            printTest(TimeValue(TimeConstraint.NamedFormat.ISO8601_Time), "time [ format: 'iso8601-time' ]"),
-            printTest(TimeValue(TimeConstraint.NamedFormat.RFC3339), "time [ format: 'rfc3339' ]"),
-            printTest(TimeValue(TimeConstraint.CustomPattern("yyyy-MM-dd")), """time [ format: "yyyy-MM-dd" ]"""),
-            printTest(TimeValue(TimeConstraint.CustomPattern("HH:mm:ss")), """time [ format: "HH:mm:ss" ]""")
+        suite("Time")(
+            printTest(TimeValue(), "time")
         ),
         suite("Lists")(
             printTest(ListOfValues(TextValue()), "text*"),
@@ -125,9 +118,7 @@ object SchemaSerializationSpec extends ZIOSpecDefault:
             roundTripTest(TextValue(Seq(textLength <= 100), Some("default")), "text with constraints and default"),
             roundTripTest(NumericValue(Seq.empty, Some(BigDecimal(0))), "number with default"),
             roundTripTest(NumericValue(Seq(NumericConstraint.Integer), Some(BigDecimal(42))), "number with constraints and default"),
-            roundTripTest(TimeValue(TimeConstraint.NamedFormat.ISO8601), "time with iso8601"),
-            roundTripTest(TimeValue(TimeConstraint.NamedFormat.ISO8601_Date), "time with iso8601-date"),
-            roundTripTest(TimeValue(TimeConstraint.CustomPattern("yyyy-MM-dd")), "time with custom pattern")
+            roundTripTest(TimeValue(), "time")
         )
     )
 
