@@ -1,0 +1,11 @@
+# Library with a 2-level reference chain: Wrapper -> Inner -> Leaf.
+
+Leaf = text [ regex = "\d+s" ]
+
+Inner = {
+    period: Leaf
+}
+
+Wrapper = {
+    config: Inner
+}

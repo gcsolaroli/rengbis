@@ -48,15 +48,50 @@ object SchemaLoader:
 
     protected def resolveReferences(schema: ResolvedSchema): Either[String, ResolvedSchema] =
         for
-            definitions <- sequenceEithers(schema.definitions.toSeq.map((scope, s) => s.replaceReferencedValues(schema.definitions.toSeq*).map(d => (scope, d))))
+            definitions <- resolveDefinitionsTransitively(schema.definitions)
             root        <- optionEither(schema.root.map(s => s.replaceReferencedValues(definitions.toSeq*)))
-        yield ResolvedSchema(root, definitions.toMap)
+        yield ResolvedSchema(root, definitions)
 
     protected def resolveParsedReferences(schema: ParsedSchema): Either[String, ParsedSchema] =
         for
-            definitions <- sequenceEithers(schema.definitions.toSeq.map((scope, s) => s.replaceReferencedValues(schema.definitions.toSeq*).map(d => (scope, d))))
+            definitions <- resolveDefinitionsTransitively(schema.definitions)
             root        <- optionEither(schema.root.map(s => s.replaceReferencedValues(definitions.toSeq*)))
-        yield ParsedSchema(root, definitions.toMap, schema.imports)
+        yield ParsedSchema(root, definitions, schema.imports)
+
+    //  `replaceReferencedValues` does a single-level substitution: when it
+    //  finds `NamedValueReference("X")` it pastes X's *current* schema in,
+    //  but doesn't descend into the substituted value. For a chain
+    //  `A -> B -> C` that means resolving A against the original definitions
+    //  pulls in B's still-unresolved form (B with a `NamedValueReference("C")`
+    //  inside). One pass isn't enough — we need to iterate to a fixed point.
+    //
+    //  This matters specifically across import boundaries: imports namespace
+    //  the imported definitions (e.g. `Period` becomes `lib.Period`), but
+    //  references inside those definitions remain un-namespaced. Anything
+    //  not resolved before namespacing can't be resolved afterwards, because
+    //  the importer's context has `lib.Period` while the inner schema still
+    //  references the bare `Period`.
+    //
+    //  Cyclic schemas (e.g. recursive `Expression = Value | Operation` with
+    //  `Operation.secondoOperand: Expression`) never converge — each pass
+    //  expands the recursion one level deeper. We bound iterations and stop
+    //  silently rather than erroring: the previous single-pass code already
+    //  tolerated cycles by leaving leftover NamedValueReferences deep in the
+    //  schema tree, and validation of shallow data didn't reach them. Keeping
+    //  that behavior preserves backward compatibility with recursive samples.
+    //
+    //  Non-cyclic bound: `definitions.size + 1` passes — each pass resolves
+    //  at least one more level of any chain that has somewhere to go.
+    private def resolveDefinitionsTransitively(definitions: Map[String, Schema.Schema]): Either[String, Map[String, Schema.Schema]] =
+        @scala.annotation.tailrec
+        def iterate(current: Map[String, Schema.Schema], passesLeft: Int): Either[String, Map[String, Schema.Schema]] =
+            sequenceEithers(current.toSeq.map((scope, s) => s.replaceReferencedValues(current.toSeq*).map(d => (scope, d)))) match
+                case Left(err)   => Left(err)
+                case Right(next) =>
+                    val nextMap = next.toMap
+                    if nextMap == current || passesLeft <= 0 then Right(nextMap)
+                    else iterate(nextMap, passesLeft - 1)
+        iterate(definitions, definitions.size + 1)
 
     protected def resolveImports(schemaPath: Path, visited: Set[Path])(schema: ParsedSchema): Either[String, ResolvedSchema] =
         if visited.contains(schemaPath) then return Left(s"Circular import detected: ${ schemaPath }")

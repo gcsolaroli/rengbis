@@ -1,0 +1,9 @@
+# Expected: fully resolved schema for transitive-import.rengbis
+
+= {
+    wrapped: {
+        config: {
+            period: text [ regex = "\d+s" ]
+        }
+    }
+}

@@ -1,0 +1,7 @@
+# Expected: fully resolved schema for transitive-refs.rengbis
+
+= {
+    config: {
+        period: text [ regex = "\d+s" ]
+    }
+}

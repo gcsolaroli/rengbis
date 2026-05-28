@@ -1,0 +1,10 @@
+# Multi-level chain (Wrapper -> Inner -> Leaf) reached through an import.
+# Within the imported file the inner reference (Leaf) is un-namespaced;
+# after namespacing as lib.* the importer's resolution pass can no
+# longer reach it, exposing the single-pass resolution bug.
+
+lib => import "transitive-common.rengbis"
+
+= {
+    wrapped: lib.Wrapper
+}

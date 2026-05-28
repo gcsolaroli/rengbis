@@ -1,0 +1,16 @@
+# Transitive references within a single file:
+#   Wrapper -> Inner -> Leaf
+# Exercises 2-level resolution (the inner ref needs to resolve through
+# the substituted middle definition).
+
+Leaf = text [ regex = "\d+s" ]
+
+Inner = {
+    period: Leaf
+}
+
+Wrapper = {
+    config: Inner
+}
+
+= Wrapper
