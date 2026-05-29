@@ -23,6 +23,18 @@ object Validator:
             case v: Valid                  => Right(())
             case v: Chunk[ValidationError] => Left(v.map(_.message).mkString("\n"))
 
+        //  Prefix every error in this result with "at $path: ". Used by
+        //  validateValue's call sites that delegate to a constraint validator
+        //  (TextValue/NumericValue/etc.) which produces flat errors with no
+        //  awareness of where in the value tree they were triggered.
+        def withPath(path: String): ValidationResult =
+            if path.isEmpty then this
+            else
+                value match
+                    case _: Valid                       => this
+                    case errors: Chunk[ValidationError] =>
+                        ValidationResult(errors.map(e => ValidationError(s"at $path: ${ e.message }")))
+
     object ValidationResult:
         def reportError(message: String): ValidationResult                  = ValidationResult(Chunk(ValidationError(message)))
         val valid: ValidationResult                                         = ValidationResult(Valid())
@@ -38,6 +50,20 @@ object Validator:
     def validate(validator: ((Schema) => Either[String, Value]))(schema: Schema): ValidationResult = validator(schema) match
         case Left(message) => ValidationResult.reportError(message)
         case Right(value)  => validateValue(schema, value)
+
+    //  Compose a child path. The root has path "" (empty); appending a field
+    //  named "name" produces "name", and a list index "[2]" produces "[2]"
+    //  (no leading dot). At deeper levels both append with a "." or "[…]"
+    //  separator as appropriate.
+    private def appendField(path: String, field: String): String =
+        if path.isEmpty then field else s"$path.$field"
+
+    private def appendIndex(path: String, idx: Int): String = s"$path[$idx]"
+
+    //  Prefix a flat error message with its path. Empty path => no prefix
+    //  (top-level errors keep their original phrasing).
+    private def prefixPath(path: String, msg: String): String =
+        if path.isEmpty then msg else s"at $path: $msg"
 
     // ========================================================================
 
@@ -221,83 +247,92 @@ object Validator:
         val sizeConstraints = constraints.collect { case c: BinaryConstraint.Size => c }
         ValidationResult.summarize(sizeConstraints.map(c => validateBinarySizeConstraint(c, data)))
 
-    def validateValue(schema: Schema, value: Value): ValidationResult = schema match
-        case Fail()                          => ValidationResult.reportError(s"fail value")
+    def validateValue(schema: Schema, value: Value, path: String = ""): ValidationResult = schema match
+        case Fail()                          => ValidationResult.reportError(prefixPath(path, "fail value"))
         case AnyValue()                      => ValidationResult.valid
         case BooleanValue()                  =>
             value match
                 case Value.BooleanValue(value) => ValidationResult.valid
-                case _                         => ValidationResult.reportError(s"expected boolean value; ${ value.valueTypeDescription } found [value: ${ value }]")
+                case _                         => ValidationResult.reportError(prefixPath(path, s"expected boolean value; ${ value.valueTypeDescription } found [value: ${ value }]"))
         case TextValue(constraints*)         =>
             value match
-                case Value.TextValue(text) => ValidationResult.summarize(constraints.map(c => validateTextConstraints(c, text)))
-                case _                     => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
+                case Value.TextValue(text) => ValidationResult.summarize(constraints.map(c => validateTextConstraints(c, text))).withPath(path)
+                case _                     => ValidationResult.reportError(prefixPath(path, s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]"))
         case GivenTextValue(givenValue)      =>
             value match
-                case Value.TextValue(value) => if (value == givenValue) then ValidationResult.valid else ValidationResult.reportError(s"expected value '${ givenValue }', found '${ value }'")
-                case _                      => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
+                case Value.TextValue(value) => if (value == givenValue) then ValidationResult.valid else ValidationResult.reportError(prefixPath(path, s"expected value '${ givenValue }', found '${ value }'"))
+                case _                      => ValidationResult.reportError(prefixPath(path, s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]"))
         case NumericValue(constraints*)      =>
             value match
-                case Value.NumberValue(numValue) => ValidationResult.summarize(constraints.map(c => validateNumericConstraints(c, numValue)))
+                case Value.NumberValue(numValue) => ValidationResult.summarize(constraints.map(c => validateNumericConstraints(c, numValue))).withPath(path)
                 case Value.TextValue(textValue)  =>
                     Try(BigDecimal(textValue)) match
-                        case Success(numValue) => ValidationResult.summarize(constraints.map(c => validateNumericConstraints(c, numValue)))
-                        case Failure(e)        => ValidationResult.reportError(e.getMessage())
-                case _                           => ValidationResult.reportError(s"expected numeric value; ${ value.valueTypeDescription } found [value: ${ value }]")
+                        case Success(numValue) => ValidationResult.summarize(constraints.map(c => validateNumericConstraints(c, numValue))).withPath(path)
+                        case Failure(e)        => ValidationResult.reportError(prefixPath(path, e.getMessage()))
+                case _                           => ValidationResult.reportError(prefixPath(path, s"expected numeric value; ${ value.valueTypeDescription } found [value: ${ value }]"))
         case SchemaBinaryValue(constraints*) =>
             value match
                 case Value.BinaryValue(data) =>
                     // Direct binary data - validate size constraints
-                    validateBinaryConstraints(constraints, data)
+                    validateBinaryConstraints(constraints, data).withPath(path)
                 case Value.TextValue(text)   =>
                     constraints.collectFirst { case BinaryConstraint.Encoding(enc) => enc } match
                         case Some(encoding) =>
                             decodeEncoding(encoding, text) match
-                                case Right(bytes) => validateBinaryConstraints(constraints, bytes)
-                                case Left(error)  => ValidationResult.reportError(s"Failed to decode $encoding: $error")
+                                case Right(bytes) => validateBinaryConstraints(constraints, bytes).withPath(path)
+                                case Left(error)  => ValidationResult.reportError(prefixPath(path, s"Failed to decode $encoding: $error"))
                         case None           =>
                             ValidationResult.valid
-                case _                       => ValidationResult.reportError(s"expected binary value; ${ value.valueTypeDescription } found [value: ${ value }]")
+                case _                       => ValidationResult.reportError(prefixPath(path, s"expected binary value; ${ value.valueTypeDescription } found [value: ${ value }]"))
         case EnumValues(values*)             =>
             value match
-                case Value.TextValue(value) => if (values.contains(value)) then ValidationResult.valid else ValidationResult.reportError(s"enum type does not include provided value: '${ value }'")
-                case _                      => ValidationResult.reportError(s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]")
+                case Value.TextValue(value) => if (values.contains(value)) then ValidationResult.valid else ValidationResult.reportError(prefixPath(path, s"enum type does not include provided value: '${ value }'"))
+                case _                      => ValidationResult.reportError(prefixPath(path, s"expected text value; ${ value.valueTypeDescription } found [value: ${ value }]"))
         case ListOfValues(s, constraints*)   =>
             value match
                 case Value.ListOfValues(values) =>
                     ValidationResult.summarize(
-                        constraints.map(c => validateListConstraints(c, values, s)) ++
-                            values.map(v => validateValue(s, v))
+                        constraints.map(c => validateListConstraints(c, values, s).withPath(path)) ++
+                            values.zipWithIndex.map((v, i) => validateValue(s, v, appendIndex(path, i)))
                     )
-                case value                      => ValidationResult.reportError(s"expected list of values; ${ value.valueTypeDescription } found [value: ${ value }]")
+                case value                      => ValidationResult.reportError(prefixPath(path, s"expected list of values; ${ value.valueTypeDescription } found [value: ${ value }]"))
         case TupleValue(options*)            =>
             value match
-                case Value.TupleOfValues(values) => ValidationResult.summarize(options.zipAll(values, Schema.Fail(), Value.Fail()).map((s, v) => validateValue(s, v)))
-                case Value.ListOfValues(values)  => ValidationResult.summarize(options.zipAll(values, Schema.Fail(), Value.Fail()).map((s, v) => validateValue(s, v)))
-                case value                       => ValidationResult.reportError(s"expected tuple of values; ${ value.valueTypeDescription } found [value: ${ value }]")
+                case Value.TupleOfValues(values) =>
+                    ValidationResult.summarize(options.zipAll(values, Schema.Fail(), Value.Fail()).zipWithIndex.map { case ((s, v), i) => validateValue(s, v, appendIndex(path, i)) })
+                case Value.ListOfValues(values)  =>
+                    ValidationResult.summarize(options.zipAll(values, Schema.Fail(), Value.Fail()).zipWithIndex.map { case ((s, v), i) => validateValue(s, v, appendIndex(path, i)) })
+                case value                       => ValidationResult.reportError(prefixPath(path, s"expected tuple of values; ${ value.valueTypeDescription } found [value: ${ value }]"))
         case AlternativeValues(options*)     =>
             options
-                .map(s => validateValue(s, value))
+                .map(s => validateValue(s, value, path))
                 .find(result => result.isValid)
-                .getOrElse(ValidationResult.reportError(s"could not match value ${ value } with any of the available options"))
+                .getOrElse(ValidationResult.reportError(prefixPath(path, s"could not match value ${ value } with any of the available options")))
         case ObjectValue(obj)                =>
             value match
                 case Value.ObjectWithValues(values) =>
+                    //  Render the actual key set alongside the missing-key error so
+                    //  the operator can immediately see when the value has the right
+                    //  field under a different name or wrapped in an extra layer (a
+                    //  very common shape mismatch). Empty key set rendered as
+                    //  `(none)` to avoid an unsightly trailing colon.
+                    val gotKeys = if values.isEmpty then "(none)" else values.keys.toList.sorted.mkString(", ")
                     ValidationResult.summarize(
                         obj.map((l, s) =>
                             values
                                 .get(l.label)
-                                .map(v => validateValue(s, v))
+                                .map(v => validateValue(s, v, appendField(path, l.label)))
                                 .getOrElse(l match
-                                    case MandatoryLabel(label) => ValidationResult.reportError(s"Value is missing expected key ${ label }")
+                                    case MandatoryLabel(label) => ValidationResult.reportError(prefixPath(path, s"Value is missing expected key '${ label }' (value has keys: ${ gotKeys })"))
                                     case OptionalLabel(label)  => ValidationResult.valid)
                         )
                     )
-                case value                          => ValidationResult.reportError(s"expected object value; ${ value.valueTypeDescription } found")
+                case value                          => ValidationResult.reportError(prefixPath(path, s"expected object value; ${ value.valueTypeDescription } found"))
         case MapValue(valueSchema)           =>
             value match
-                case Value.ObjectWithValues(values) => ValidationResult.summarize(values.values.map(v => validateValue(valueSchema, v)))
-                case value                          => ValidationResult.reportError(s"expected map/object value; ${ value.valueTypeDescription } found")
-        case NamedValueReference(_)          => ValidationResult.reportError(s"#WTF: unresolved NamedValueReference still present")
-        case ImportStatement(_, _)           => ValidationResult.reportError(s"#WTF: unresolved ImportStatement still present")
-        case ScopedReference(_, _)           => ValidationResult.reportError(s"#WTF: unresolved ScopedReference still present")
+                case Value.ObjectWithValues(values) =>
+                    ValidationResult.summarize(values.toList.map { (k, v) => validateValue(valueSchema, v, appendField(path, k)) })
+                case value                          => ValidationResult.reportError(prefixPath(path, s"expected map/object value; ${ value.valueTypeDescription } found"))
+        case NamedValueReference(_)          => ValidationResult.reportError(prefixPath(path, s"#WTF: unresolved NamedValueReference still present"))
+        case ImportStatement(_, _)           => ValidationResult.reportError(prefixPath(path, s"#WTF: unresolved ImportStatement still present"))
+        case ScopedReference(_, _)           => ValidationResult.reportError(prefixPath(path, s"#WTF: unresolved ScopedReference still present"))
